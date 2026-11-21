@@ -85,7 +85,81 @@ describe('parseSnapshotResponse', () => {
     expect(snapshot.workspaces).toEqual([
       { workspaceId: 'wE', label: 'hamster', repoName: 'hamster' },
     ])
-    expect(snapshot.paneIds).toEqual(['w1H:p1', 'wE:p1'])
+    expect(snapshot).not.toHaveProperty('paneIds')
+  })
+
+  function tweak(edit: (snapshot: Record<string, unknown>) => void): string {
+    const envelope = JSON.parse(snapshotLine()) as {
+      result: { snapshot: Record<string, unknown> }
+    }
+    edit(envelope.result.snapshot)
+    return JSON.stringify(envelope)
+  }
+
+  it('accepts a snapshot without protocol', () => {
+    const line = tweak((snapshot) => {
+      delete snapshot['protocol']
+    })
+    const parsed = parseSnapshotResponse(line)
+    expect(parsed.protocol).toBeNull()
+    expect(parsed.agents).toHaveLength(1)
+  })
+
+  it('accepts a workspace without a label', () => {
+    const line = tweak((snapshot) => {
+      const [workspace] = snapshot['workspaces'] as Record<string, unknown>[]
+      if (workspace) delete workspace['label']
+    })
+    expect(parseSnapshotResponse(line).workspaces).toEqual([
+      { workspaceId: 'wE', label: null, repoName: 'hamster' },
+    ])
+  })
+
+  it('accepts a snapshot without panes', () => {
+    const line = tweak((snapshot) => {
+      delete snapshot['panes']
+    })
+    expect(parseSnapshotResponse(line).agents).toHaveLength(1)
+  })
+
+  it('skips a malformed agent and keeps the others', () => {
+    const line = tweak((snapshot) => {
+      const agents = snapshot['agents'] as Record<string, unknown>[]
+      const [good] = agents
+      snapshot['agents'] = [
+        { ...good, pane_id: 'wX:p1', workspace_id: undefined },
+        'not an object',
+        good,
+      ]
+    })
+    expect(parseSnapshotResponse(line).agents.map((agent) => agent.paneId)).toEqual(['w1H:p1'])
+  })
+
+  it('skips a malformed workspace and keeps the others', () => {
+    const line = tweak((snapshot) => {
+      const workspaces = snapshot['workspaces'] as Record<string, unknown>[]
+      snapshot['workspaces'] = [{ label: 'no id' }, 7, ...workspaces]
+    })
+    expect(parseSnapshotResponse(line).workspaces.map((w) => w.workspaceId)).toEqual(['wE'])
+  })
+
+  it('treats missing workspaces as none', () => {
+    const line = tweak((snapshot) => {
+      delete snapshot['workspaces']
+    })
+    expect(parseSnapshotResponse(line).workspaces).toEqual([])
+  })
+
+  it('throws malformed when the agents array is missing', () => {
+    const line = tweak((snapshot) => {
+      delete snapshot['agents']
+    })
+    try {
+      parseSnapshotResponse(line)
+      expect.unreachable()
+    } catch (error) {
+      expect((error as HerdrProtocolError).code).toBe('malformed')
+    }
   })
 
   it('falls back to terminal_title when the stripped title is null', () => {

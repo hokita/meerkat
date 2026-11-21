@@ -28,9 +28,14 @@ export interface SupervisorOptions {
   reconcileMs?: number
   backoffInitialMs?: number
   backoffMaxMs?: number
+  log?: (message: string) => void
 }
 
 class StreamFailure extends Error {}
+
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 function paneSetKey(snapshot: HerdrSnapshot): string {
   return snapshot.agents
@@ -46,6 +51,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   const reconcileMs = opts.reconcileMs ?? 60000
   const backoffInitialMs = opts.backoffInitialMs ?? 500
   const backoffMaxMs = opts.backoffMaxMs ?? 5000
+  const log = opts.log ?? ((message: string) => console.error(message))
 
   let board: BoardState = { cards: new Map() }
   let herdr: HerdrConnection = 'disconnected'
@@ -57,6 +63,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   let stopped = false
   let subscription: HerdrSubscription | null = null
   let snapshotDue = false
+  let outageLogged = false
   let streamFailed = false
   let snapshotInFlight = false
   let eventsDuringSnapshot = false
@@ -163,6 +170,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
     if (stopped) return snapshot
     board = boardFromSnapshot(board, snapshot, now(), home)
     herdr = 'connected'
+    outageLogged = false
     armReconcile()
     publish()
     if (eventsDuringSnapshot && !snapshotDue) scheduleSnapshot()
@@ -244,11 +252,13 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
         backoff = backoffInitialMs
         if (stopped) break
         await monitor(snapshot)
-      } catch {
+      } catch (error) {
         if (stopped) break
         closeSubscription()
         streamFailed = false
         snapshotDue = false
+        if (!outageLogged) log(`Herdr not reachable: ${reasonOf(error)}`)
+        outageLogged = true
         setConnection('disconnected')
         await sleep(backoff)
         backoff = Math.min(backoff * 2, backoffMaxMs)

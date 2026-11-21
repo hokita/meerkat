@@ -54,7 +54,6 @@ describe('builders', () => {
     })
     const parsed = parseSnapshotResponse(line)
     expect(parsed.protocol).toBe(22)
-    expect(parsed.paneIds).toEqual(['w1:p1'])
     expect(parsed.agents[0]).toMatchObject({ paneId: 'w1:p1', name: 'a', status: 'working' })
     expect(parsed.workspaces).toHaveLength(1)
   })
@@ -65,9 +64,11 @@ describe('server', () => {
     const fake = await start({ snapshot: fakeSnapshot({ agents: [] }) })
     const client = createHerdrClient({ socketPath: fake.socketPath })
     fake.setSnapshot(fakeSnapshot({ agents: [fakeAgent({ pane_id: 'w2:p1' })] }))
-    expect(parseSnapshotResponse(await client.request('session.snapshot', {})).paneIds).toEqual([
-      'w2:p1',
-    ])
+    expect(
+      parseSnapshotResponse(await client.request('session.snapshot', {})).agents.map(
+        (agent) => agent.paneId
+      )
+    ).toEqual(['w2:p1'])
     fake.setRead('w2:p1', 'hi')
     expect(parseReadResponse(await client.request('agent.read', { target: 'w2:p1' }))).toEqual({
       kind: 'ok',

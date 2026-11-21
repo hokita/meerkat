@@ -17,12 +17,11 @@ function agent(paneId: string, status: AgentStatus, extra: Partial<HerdrAgent> =
   }
 }
 
-function snapshot(agents: HerdrAgent[], paneIds: string[] = []): HerdrSnapshot {
+function snapshot(agents: HerdrAgent[]): HerdrSnapshot {
   return {
     protocol: 1,
     agents,
     workspaces: [{ workspaceId: 'w1', label: 'one', repoName: null }],
-    paneIds: [...paneIds, ...agents.map((a) => a.paneId)],
   }
 }
 
@@ -84,11 +83,6 @@ describe('boardFromSnapshot', () => {
       since: 1000,
       sinceIsLowerBound: true,
     })
-  })
-
-  it('only turns agents into cards', () => {
-    const state = boardFromSnapshot(null, snapshot([agent('p1', 'idle')], ['bare']), 1000, HOME)
-    expect([...state.cards.keys()]).toEqual(['p1'])
   })
 
   it('keeps since for unchanged statuses and refreshes other fields', () => {

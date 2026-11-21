@@ -36,7 +36,13 @@ function supervise(
   client: HerdrClient,
   overrides: Partial<Parameters<typeof createSupervisor>[0]> = {}
 ) {
-  const supervisor = createSupervisor({ client, home: HOME, ...TIMINGS, ...overrides })
+  const supervisor = createSupervisor({
+    client,
+    home: HOME,
+    log: () => undefined,
+    ...TIMINGS,
+    ...overrides,
+  })
   supervisors.push(supervisor)
   return supervisor
 }
@@ -252,6 +258,30 @@ describe('supervisor', () => {
     expect(gaps.at(-1)).toBeGreaterThanOrEqual(35)
     await fake.restart()
     await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
+  })
+
+  it('logs why Herdr is not reachable once per disconnect', async () => {
+    const fake = await startFake()
+    await fake.stop()
+    const real = createHerdrClient({ socketPath: fake.socketPath })
+    let attempts = 0
+    const client: HerdrClient = {
+      request(method, params) {
+        attempts += 1
+        return real.request(method, params)
+      },
+      subscribe: (params, onLine) => real.subscribe(params, onLine),
+    }
+    const logged: string[] = []
+    const supervisor = supervise(client, { log: (message) => logged.push(message) })
+    supervisor.start()
+    await vi.waitFor(() => expect(attempts).toBeGreaterThanOrEqual(3))
+    expect(logged).toHaveLength(1)
+    expect(logged[0]).toMatch(/^Herdr not reachable: .+/)
+    await fake.restart()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
+    await fake.stop()
+    await vi.waitFor(() => expect(logged).toHaveLength(2))
   })
 
   it('treats a stream error item as a disconnect and recovers', async () => {

@@ -11,15 +11,14 @@ export interface HerdrAgent {
 
 export interface HerdrWorkspace {
   workspaceId: string
-  label: string
+  label: string | null
   repoName: string | null
 }
 
 export interface HerdrSnapshot {
-  protocol: number
+  protocol: number | null
   agents: HerdrAgent[]
   workspaces: HerdrWorkspace[]
-  paneIds: string[]
 }
 
 export class HerdrProtocolError extends Error {
@@ -102,46 +101,50 @@ function resultOf(line: string, type: string): JsonObject {
   return result
 }
 
-function objectArray(source: JsonObject, key: string): JsonObject[] {
-  const value = source[key]
-  if (!Array.isArray(value)) throw malformed(`missing array field ${key}`)
-  return value.map((item) => {
-    if (!isObject(item)) throw malformed(`non-object entry in ${key}`)
-    return item
+function recordsOf<T>(value: unknown, parse: (record: JsonObject) => T | null): T[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((record) => {
+    const parsed = isObject(record) ? parse(record) : null
+    return parsed === null ? [] : [parsed]
   })
+}
+
+function parseAgent(agent: JsonObject): HerdrAgent | null {
+  const paneId = asString(agent['pane_id'])
+  const workspaceId = asString(agent['workspace_id'])
+  if (paneId === null || workspaceId === null) return null
+  return {
+    paneId,
+    workspaceId,
+    name: asString(agent['name']),
+    status: parseStatus(agent['agent_status']),
+    cwd: asString(agent['cwd']),
+    terminalTitle: asString(agent['terminal_title_stripped']) ?? asString(agent['terminal_title']),
+  }
+}
+
+function parseWorkspace(workspace: JsonObject): HerdrWorkspace | null {
+  const workspaceId = asString(workspace['workspace_id'])
+  if (workspaceId === null) return null
+  const worktree = workspace['worktree']
+  return {
+    workspaceId,
+    label: asString(workspace['label']),
+    repoName: isObject(worktree) ? asString(worktree['repo_name']) : null,
+  }
 }
 
 export function parseSnapshotResponse(line: string): HerdrSnapshot {
   const result = resultOf(line, 'session_snapshot')
   const snapshot = result['snapshot']
   if (!isObject(snapshot)) throw malformed('missing snapshot')
+  if (!Array.isArray(snapshot['agents'])) throw malformed('missing array field agents')
   const protocol = snapshot['protocol']
-  if (typeof protocol !== 'number') throw malformed('missing protocol')
-
-  const agents = objectArray(snapshot, 'agents').map((agent): HerdrAgent => {
-    return {
-      paneId: requireString(agent, 'pane_id'),
-      workspaceId: requireString(agent, 'workspace_id'),
-      name: asString(agent['name']),
-      status: parseStatus(agent['agent_status']),
-      cwd: asString(agent['cwd']),
-      terminalTitle:
-        asString(agent['terminal_title_stripped']) ?? asString(agent['terminal_title']),
-    }
-  })
-
-  const workspaces = objectArray(snapshot, 'workspaces').map((workspace): HerdrWorkspace => {
-    const worktree = workspace['worktree']
-    return {
-      workspaceId: requireString(workspace, 'workspace_id'),
-      label: requireString(workspace, 'label'),
-      repoName: isObject(worktree) ? asString(worktree['repo_name']) : null,
-    }
-  })
-
-  const paneIds = objectArray(snapshot, 'panes').map((pane) => requireString(pane, 'pane_id'))
-
-  return { protocol, agents, workspaces, paneIds }
+  return {
+    protocol: typeof protocol === 'number' ? protocol : null,
+    agents: recordsOf(snapshot['agents'], parseAgent),
+    workspaces: recordsOf(snapshot['workspaces'], parseWorkspace),
+  }
 }
 
 export function parseStreamLine(line: string): StreamItem {
