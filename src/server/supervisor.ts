@@ -58,7 +58,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   const log = opts.log ?? ((message: string) => console.error(message))
 
   let board: BoardState = { cards: new Map() }
-  let herdr: HerdrConnection = 'disconnected'
+  let herdr: HerdrConnection = 'connecting'
   let state: SupervisorState = { herdr, board: toView(board) }
   let serialized = JSON.stringify(state)
   const listeners = new Set<(state: SupervisorState) => void>()

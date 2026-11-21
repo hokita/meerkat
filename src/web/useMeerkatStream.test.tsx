@@ -71,6 +71,14 @@ describe('useMeerkatStream', () => {
     expect(result.current.herdr).toBe('disconnected')
   })
 
+  it('stores a connecting Herdr', () => {
+    const { result } = renderHook(() => useMeerkatStream())
+    act(() => {
+      StubEventSource.instances[0]?.emit('connection', JSON.stringify({ herdr: 'connecting' }))
+    })
+    expect(result.current.herdr).toBe('connecting')
+  })
+
   it('ignores malformed messages', () => {
     const { result } = renderHook(() => useMeerkatStream())
     act(() => {

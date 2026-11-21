@@ -116,6 +116,11 @@ describe('Banners', () => {
     expect(screen.getByText('Meerkat server not reachable — retrying')).toBeInTheDocument()
   })
 
+  it('shows no herdr banner while connecting', () => {
+    const { container } = render(<Banners herdr="connecting" stream="open" />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
   it('renders nothing otherwise', () => {
     const { container } = render(<Banners herdr="connected" stream="open" />)
     expect(container).toBeEmptyDOMElement()

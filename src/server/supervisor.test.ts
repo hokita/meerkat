@@ -68,12 +68,32 @@ function subscribedPanes(fake: FakeHerdr, index: number): string[] {
 }
 
 describe('supervisor', () => {
-  it('starts disconnected with an empty board', () => {
+  it('starts connecting with an empty board', () => {
     const supervisor = supervise(createHerdrClient({ socketPath: '/nonexistent/h.sock' }))
     expect(supervisor.current()).toEqual({
-      herdr: 'disconnected',
+      herdr: 'connecting',
       board: { attention: [], working: [], idle: [] },
     })
+  })
+
+  it('goes from connecting to disconnected when the first snapshot fails', async () => {
+    const supervisor = supervise(createHerdrClient({ socketPath: '/nonexistent/h.sock' }))
+    const connections: string[] = []
+    supervisor.onChange((state) => connections.push(state.herdr))
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('disconnected'))
+    expect(connections).toEqual(['disconnected'])
+  })
+
+  it('goes from connecting straight to connected when the first snapshot succeeds', async () => {
+    const fake = await startFake()
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
+    const connections: string[] = []
+    supervisor.onChange((state) => connections.push(state.herdr))
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
+    expect(connections[0]).toBe('connected')
+    expect(connections).not.toContain('disconnected')
   })
 
   it('connects, builds the board, snapshots then subscribes once for every agent pane', async () => {

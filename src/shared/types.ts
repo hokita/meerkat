@@ -19,4 +19,4 @@ export interface BoardView {
   idle: Card[]
 }
 
-export type HerdrConnection = 'connected' | 'disconnected'
+export type HerdrConnection = 'connecting' | 'connected' | 'disconnected'

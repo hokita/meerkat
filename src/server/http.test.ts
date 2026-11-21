@@ -308,6 +308,12 @@ describe('GET /api/events', () => {
     expect(await stream.until('event: board')).toContain('data: {"herdr":"disconnected"}')
   })
 
+  it('reports a connecting Herdr on the connection event', async () => {
+    const h = await harness({ state: { herdr: 'connecting', board: emptyBoard } })
+    const stream = await openStream(h)
+    expect(await stream.until('event: board')).toContain('data: {"herdr":"connecting"}')
+  })
+
   it('sends heartbeat comments', async () => {
     const h = await harness({ heartbeatMs: 20 })
     const stream = await openStream(h)
@@ -360,6 +366,13 @@ describe('GET /api/sessions/:id/output', () => {
 
   it('answers 503 without calling Herdr when disconnected', async () => {
     const h = await harness({ state: { herdr: 'disconnected', board: emptyBoard } })
+    const reply = await get(h, '/api/sessions/w1H:p1/output')
+    expect(reply.status).toBe(503)
+    expect(h.fake.received).toEqual([])
+  })
+
+  it('answers 503 without calling Herdr while still connecting', async () => {
+    const h = await harness({ state: { herdr: 'connecting', board: emptyBoard } })
     const reply = await get(h, '/api/sessions/w1H:p1/output')
     expect(reply.status).toBe(503)
     expect(h.fake.received).toEqual([])
