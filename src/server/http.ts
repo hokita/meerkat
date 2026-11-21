@@ -211,7 +211,7 @@ export function createHttpServer(opts: HttpServerOptions): http.Server {
     await serveStatic(res, pathname, opts.staticDir)
   }
 
-  return http.createServer((req, res) => {
+  return http.createServer({ requireHostHeader: false }, (req, res) => {
     route(req, res).catch(() => {
       if (res.headersSent) res.destroy()
       else sendText(res, 500, 'Internal Server Error')

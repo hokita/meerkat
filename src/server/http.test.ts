@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
-import type { AddressInfo } from 'node:net'
+import net, { type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -218,6 +218,26 @@ describe('host check and method guard', () => {
     const ok = await get(h, '/')
     expect(ok.status).toBe(200)
     expect(ok.headers['content-type']).toContain('text/html')
+  })
+
+  it('answers 421 with nosniff when the Host header is missing', async () => {
+    const h = await harness()
+    for (const request of [
+      'GET / HTTP/1.0\r\n\r\n',
+      'GET / HTTP/1.1\r\nConnection: close\r\n\r\n',
+    ]) {
+      const raw = await new Promise<string>((resolve, reject) => {
+        const socket = net.connect(h.port, '127.0.0.1', () => socket.write(request))
+        let data = ''
+        socket.setEncoding('utf8')
+        socket.on('data', (chunk: string) => (data += chunk))
+        socket.on('end', () => resolve(data))
+        socket.on('error', reject)
+      })
+      expect(raw.startsWith('HTTP/1.1 421')).toBe(true)
+      expect(raw.toLowerCase()).toContain('x-content-type-options: nosniff')
+      expect(raw.toLowerCase()).toContain('cache-control: no-store')
+    }
   })
 
   it('checks the Host before the output route reaches Herdr', async () => {
