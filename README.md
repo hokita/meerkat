@@ -6,12 +6,15 @@ opens the last lines of a session's output on demand.
 
 ## Run
 
+Meerkat needs Node 24.22.3, pinned with [Volta](https://volta.sh) in `package.json`.
+
 ```sh
 npm install
 npm start
 ```
 
-Then open http://localhost:4321.
+Then open http://localhost:4321. Herdr must be running for the board to fill; until Meerkat can reach
+it, the page shows `Herdr is not reachable — showing last known state`.
 
 | Variable               | Default                      | Meaning                       |
 | ---------------------- | ---------------------------- | ----------------------------- |
@@ -45,6 +48,9 @@ npm test
 npm run lint
 npm run typecheck
 npm run format:check
+npm run check:node-pins
+npm run test:e2e
 ```
 
-Tests use a fake Herdr and never touch the real socket.
+`npm run test:e2e` drives Chromium through Playwright on port 43219; install the browser once with
+`npx playwright install chromium`. Tests use a fake Herdr and never touch the real socket.

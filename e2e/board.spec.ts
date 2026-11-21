@@ -79,7 +79,7 @@ test('survives a Herdr restart', async ({ page, meerkat }) => {
 
 test.describe('with 60 sessions', () => {
   const many = Array.from({ length: 60 }, (_, index) =>
-    fakeAgent({ pane_id: `m${index}:p1`, name: `many-${index}`, agent_status: 'working' })
+    fakeAgent({ pane_id: `wm${index}:p1`, name: `many-${index}`, agent_status: 'working' })
   )
   test.use({ initialSnapshot: fakeSnapshot({ agents: many }) })
 
@@ -93,6 +93,15 @@ test.describe('with 60 sessions', () => {
       (subscription) => subscription.type === 'pane.agent_status_changed'
     )
     expect(statusSubscriptions).toHaveLength(60)
+  })
+
+  test('opens output for one of 60 sessions', async ({ page, meerkat }) => {
+    const last = many.at(-1)
+    if (last === undefined) throw new Error('no sessions')
+    meerkat.fake.setRead(last.pane_id, 'many output')
+    await page.goto(meerkat.baseURL)
+    await page.getByRole('button', { name: /many-59/ }).click()
+    await expect(page.getByRole('dialog').locator('pre')).toHaveText('many output')
   })
 })
 
