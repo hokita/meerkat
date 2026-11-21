@@ -18,6 +18,7 @@ export interface FakeHerdr {
   setSnapshot(snapshot: unknown): void
   setRead(paneId: string, text: string | null): void
   setSnapshotDelay(ms: number): void
+  setSubscribeError(error: { code: string; message: string } | null): void
   pushStatus(paneId: string, status: string, workspaceId?: string): void
   pushRaw(line: string): void
   stop(): Promise<void>
@@ -149,6 +150,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHerdr> {
   let snapshot = options.snapshot
   let snapshotDelayMs = 0
+  let subscribeError: { code: string; message: string } | null = null
   const reads = new Map<string, string>(Object.entries(options.reads ?? {}))
   const connections = new Set<net.Socket>()
   const subscribers = new Set<net.Socket>()
@@ -169,6 +171,9 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
     },
     setSnapshotDelay(ms) {
       snapshotDelayMs = ms
+    },
+    setSubscribeError(error) {
+      subscribeError = error
     },
     setRead(paneId, text) {
       if (text === null) reads.delete(paneId)
@@ -233,6 +238,8 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
         truncated: false,
       }
       socket.end(`${JSON.stringify({ id, result: { type: 'pane_read', read } })}\n`)
+    } else if (method === 'events.subscribe' && subscribeError !== null) {
+      socket.end(`${JSON.stringify({ id, error: subscribeError })}\n`)
     } else if (method === 'events.subscribe') {
       subscribers.add(socket)
       socket.write(`${JSON.stringify({ id, result: { type: 'subscription_started' } })}\n`)

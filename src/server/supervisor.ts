@@ -37,6 +37,10 @@ function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function endedOf(subscription: HerdrSubscription): Promise<'ended'> {
+  return subscription.ended.then(() => 'ended' as const)
+}
+
 function paneSetKey(snapshot: HerdrSnapshot): string {
   return snapshot.agents
     .map((agent) => agent.paneId)
@@ -64,6 +68,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   let subscription: HerdrSubscription | null = null
   let snapshotDue = false
   let outageLogged = false
+  let backoff = backoffInitialMs
   let streamFailed = false
   let snapshotInFlight = false
   let eventsDuringSnapshot = false
@@ -191,6 +196,9 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
         } else {
           scheduleSnapshot()
         }
+      } else if (item.kind === 'started') {
+        backoff = backoffInitialMs
+        scheduleSnapshot()
       } else if (item.kind === 'topology') {
         scheduleSnapshot()
       } else if (item.kind === 'error') {
@@ -224,12 +232,9 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
 
   async function monitor(initial: HerdrSnapshot): Promise<void> {
     let subscribedKey = paneSetKey(initial)
-    let current = openSubscription(initial)
+    let ended = endedOf(openSubscription(initial))
     while (!stopped) {
-      const outcome = await Promise.race([
-        current.ended.then(() => 'ended' as const),
-        waitForSignal(),
-      ])
+      const outcome = await Promise.race([ended, waitForSignal()])
       if (stopped) return
       if (outcome === 'ended' || streamFailed) throw new StreamFailure('subscription ended')
       if (!snapshotDue) continue
@@ -239,17 +244,16 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
       if (key !== subscribedKey) {
         closeSubscription()
         subscribedKey = key
-        current = openSubscription(snapshot)
+        ended = endedOf(openSubscription(snapshot))
       }
     }
   }
 
   async function loop(): Promise<void> {
-    let backoff = backoffInitialMs
+    backoff = backoffInitialMs
     while (!stopped) {
       try {
         const snapshot = await takeSnapshot()
-        backoff = backoffInitialMs
         if (stopped) break
         await monitor(snapshot)
       } catch (error) {

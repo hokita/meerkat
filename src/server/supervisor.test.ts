@@ -81,9 +81,9 @@ describe('supervisor', () => {
     const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
     supervisor.start()
     await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
-    await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
     expect(paneIds(supervisor.current())).toEqual(['wJ:p1', 'wK:p1'])
-    expect(methods(fake)).toEqual(['session.snapshot', 'events.subscribe'])
+    expect(methods(fake)).toEqual(['session.snapshot', 'events.subscribe', 'session.snapshot'])
     expect(subscribedPanes(fake, 0)).toEqual(['wJ:p1', 'wK:p1'])
   })
 
@@ -146,7 +146,7 @@ describe('supervisor', () => {
     )
     fake.pushStatus('wL:p1', 'working')
     await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(2))
-    expect(count(fake, 'session.snapshot')).toBe(2)
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(4))
     expect(subscribedPanes(fake, 1)).toEqual(['wJ:p1', 'wK:p1', 'wL:p1'])
     expect(paneIds(supervisor.current())).toEqual(['wJ:p1', 'wK:p1', 'wL:p1'])
     expect(supervisor.current().herdr).toBe('connected')
@@ -174,11 +174,11 @@ describe('supervisor', () => {
       debounceMs: 30,
     })
     supervisor.start()
-    await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
-    for (let i = 0; i < 3; i += 1) fake.pushRaw('{"event":"pane_created","data":{}}')
     await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
+    for (let i = 0; i < 3; i += 1) fake.pushRaw('{"event":"pane_created","data":{}}')
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(3))
     await new Promise((resolve) => setTimeout(resolve, 80))
-    expect(count(fake, 'session.snapshot')).toBe(2)
+    expect(count(fake, 'session.snapshot')).toBe(3)
     expect(count(fake, 'events.subscribe')).toBe(1)
   })
 
@@ -188,12 +188,12 @@ describe('supervisor', () => {
       reconcileMs: 60000,
     })
     supervisor.start()
-    await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
     fake.setSnapshotDelay(100)
     fake.pushRaw('{"event":"pane_created","data":{}}')
-    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
-    fake.pushRaw('{"event":"pane_created","data":{}}')
     await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(3))
+    fake.pushRaw('{"event":"pane_created","data":{}}')
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(4))
   })
 
   it('keeps a status that arrives for a known pane while a snapshot is in flight', async () => {
@@ -202,10 +202,10 @@ describe('supervisor', () => {
       reconcileMs: 60000,
     })
     supervisor.start()
-    await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
     fake.setSnapshotDelay(100)
     fake.pushRaw('{"event":"pane_created","data":{}}')
-    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(3))
     fake.setSnapshot(
       fakeSnapshot({
         agents: [
@@ -215,7 +215,7 @@ describe('supervisor', () => {
       })
     )
     fake.pushStatus('wJ:p1', 'done')
-    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(3))
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(4))
     await vi.waitFor(() =>
       expect(supervisor.current().board.attention.map((c) => c.paneId)).toEqual(['wJ:p1'])
     )
@@ -284,6 +284,55 @@ describe('supervisor', () => {
     await vi.waitFor(() => expect(logged).toHaveLength(2))
   })
 
+  it('confirms with one snapshot once the subscription has started', async () => {
+    const fake = await startFake()
+    const real = createHerdrClient({ socketPath: fake.socketPath })
+    const client: HerdrClient = {
+      request: (method, params) => real.request(method, params),
+      subscribe(params, onLine) {
+        fake.setSnapshot(
+          fakeSnapshot({
+            agents: [
+              fakeAgent({ pane_id: 'wJ:p1', agent_status: 'done' }),
+              fakeAgent({ pane_id: 'wK:p1' }),
+            ],
+          })
+        )
+        return real.subscribe(params, onLine)
+      },
+    }
+    const supervisor = supervise(client, { reconcileMs: 60000 })
+    supervisor.start()
+    await vi.waitFor(() =>
+      expect(supervisor.current().board.attention.map((c) => c.paneId)).toEqual(['wJ:p1'])
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(count(fake, 'session.snapshot')).toBe(2)
+    expect(count(fake, 'events.subscribe')).toBe(1)
+  })
+
+  it('backs off while Herdr keeps rejecting the subscription', async () => {
+    const fake = await startFake()
+    fake.setSubscribeError({ code: 'invalid_request', message: 'no' })
+    const real = createHerdrClient({ socketPath: fake.socketPath })
+    const attempts: number[] = []
+    const client: HerdrClient = {
+      request: (method, params) => real.request(method, params),
+      subscribe(params, onLine) {
+        attempts.push(performance.now())
+        return real.subscribe(params, onLine)
+      },
+    }
+    const supervisor = supervise(client)
+    supervisor.start()
+    await vi.waitFor(() => expect(attempts.length).toBeGreaterThanOrEqual(6))
+    const gaps = attempts.slice(1).map((time, i) => time - (attempts[i] ?? 0))
+    expect(gaps[0]).toBeLessThan(gaps[3] ?? 0)
+    expect(gaps.at(-1)).toBeGreaterThanOrEqual(35)
+    fake.setSubscribeError(null)
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
+  })
+
   it('treats a stream error item as a disconnect and recovers', async () => {
     const fake = await startFake()
     const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
@@ -316,7 +365,7 @@ describe('supervisor', () => {
       reconcileMs: 50,
     })
     supervisor.start()
-    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBeGreaterThanOrEqual(2))
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBeGreaterThanOrEqual(3))
     expect(count(fake, 'events.subscribe')).toBe(1)
     expect(supervisor.current().herdr).toBe('connected')
   })
