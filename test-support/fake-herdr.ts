@@ -17,6 +17,7 @@ export interface FakeHerdr {
   connectionCount: number
   setSnapshot(snapshot: unknown): void
   setRead(paneId: string, text: string | null): void
+  setSnapshotDelay(ms: number): void
   pushStatus(paneId: string, status: string, workspaceId?: string): void
   pushRaw(line: string): void
   stop(): Promise<void>
@@ -147,6 +148,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHerdr> {
   let snapshot = options.snapshot
+  let snapshotDelayMs = 0
   const reads = new Map<string, string>(Object.entries(options.reads ?? {}))
   const connections = new Set<net.Socket>()
   const subscribers = new Set<net.Socket>()
@@ -164,6 +166,9 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
     connectionCount: 0,
     setSnapshot(next) {
       snapshot = next
+    },
+    setSnapshotDelay(ms) {
+      snapshotDelayMs = ms
     },
     setRead(paneId, text) {
       if (text === null) reads.delete(paneId)
@@ -200,7 +205,12 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
     const method = request['method']
     const params = request['params']
     if (method === 'session.snapshot') {
-      socket.end(`${JSON.stringify({ id, result: { type: 'session_snapshot', snapshot } })}\n`)
+      const body = `${JSON.stringify({ id, result: { type: 'session_snapshot', snapshot } })}\n`
+      if (snapshotDelayMs <= 0) socket.end(body)
+      else
+        setTimeout(() => {
+          if (!socket.destroyed) socket.end(body)
+        }, snapshotDelayMs)
     } else if (method === 'agent.read') {
       const target = isObject(params) ? params['target'] : undefined
       const text = typeof target === 'string' ? reads.get(target) : undefined

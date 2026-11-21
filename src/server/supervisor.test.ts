@@ -176,6 +176,45 @@ describe('supervisor', () => {
     expect(count(fake, 'events.subscribe')).toBe(1)
   })
 
+  it('does not lose a topology event that arrives while a snapshot is in flight', async () => {
+    const fake = await startFake()
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), {
+      reconcileMs: 60000,
+    })
+    supervisor.start()
+    await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
+    fake.setSnapshotDelay(100)
+    fake.pushRaw('{"event":"pane_created","data":{}}')
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
+    fake.pushRaw('{"event":"pane_created","data":{}}')
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(3))
+  })
+
+  it('keeps a status that arrives for a known pane while a snapshot is in flight', async () => {
+    const fake = await startFake()
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), {
+      reconcileMs: 60000,
+    })
+    supervisor.start()
+    await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
+    fake.setSnapshotDelay(100)
+    fake.pushRaw('{"event":"pane_created","data":{}}')
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
+    fake.setSnapshot(
+      fakeSnapshot({
+        agents: [
+          fakeAgent({ pane_id: 'wJ:p1', agent_status: 'done' }),
+          fakeAgent({ pane_id: 'wK:p1' }),
+        ],
+      })
+    )
+    fake.pushStatus('wJ:p1', 'done')
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(3))
+    await vi.waitFor(() =>
+      expect(supervisor.current().board.attention.map((c) => c.paneId)).toEqual(['wJ:p1'])
+    )
+  })
+
   it('recovers after Herdr restarts mid-stream', async () => {
     const fake = await startFake()
     const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))

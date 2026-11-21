@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   fakeAgent,
   fakeSnapshot,
@@ -108,5 +108,22 @@ describe('server', () => {
     expect(fake.socketPath).toBe(socketPath)
     const client = createHerdrClient({ socketPath })
     expect(await client.request('session.snapshot', {})).toContain('session_snapshot')
+  })
+})
+
+describe('snapshot delay', () => {
+  it('answers with the snapshot as of the request, after the delay', async () => {
+    const fake = await start({
+      snapshot: fakeSnapshot({ agents: [fakeAgent({ pane_id: 'w1:p1' })] }),
+    })
+    fake.setSnapshotDelay(60)
+    const client = createHerdrClient({ socketPath: fake.socketPath })
+    const startedAt = performance.now()
+    const pending = client.request('session.snapshot', {})
+    await vi.waitFor(() => expect(fake.received).toHaveLength(1))
+    fake.setSnapshot(fakeSnapshot({ agents: [fakeAgent({ pane_id: 'w2:p1' })] }))
+    const snapshot = parseSnapshotResponse(await pending)
+    expect(performance.now() - startedAt).toBeGreaterThanOrEqual(50)
+    expect(snapshot.agents.map((agent) => agent.paneId)).toEqual(['w1:p1'])
   })
 })

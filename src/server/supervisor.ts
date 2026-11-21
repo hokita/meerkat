@@ -58,6 +58,8 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   let subscription: HerdrSubscription | null = null
   let snapshotDue = false
   let streamFailed = false
+  let snapshotInFlight = false
+  let eventsDuringSnapshot = false
   let wake: (() => void) | null = null
   let debounceTimer: NodeJS.Timeout | null = null
   let reconcileTimer: NodeJS.Timeout | null = null
@@ -145,18 +147,25 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   }
 
   async function takeSnapshot(): Promise<HerdrSnapshot> {
-    const line = await client.request('session.snapshot', {})
-    const snapshot = parseSnapshotResponse(line)
-    if (stopped) return snapshot
-    board = boardFromSnapshot(board, snapshot, now(), home)
-    herdr = 'connected'
     snapshotDue = false
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer)
       debounceTimer = null
     }
+    eventsDuringSnapshot = false
+    snapshotInFlight = true
+    let snapshot: HerdrSnapshot
+    try {
+      snapshot = parseSnapshotResponse(await client.request('session.snapshot', {}))
+    } finally {
+      snapshotInFlight = false
+    }
+    if (stopped) return snapshot
+    board = boardFromSnapshot(board, snapshot, now(), home)
+    herdr = 'connected'
     armReconcile()
     publish()
+    if (eventsDuringSnapshot && !snapshotDue) scheduleSnapshot()
     return snapshot
   }
 
@@ -164,6 +173,9 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
     try {
       if (stopped || owner !== subscription) return
       const item = parseStreamLine(line)
+      if (snapshotInFlight && (item.kind === 'status' || item.kind === 'topology')) {
+        eventsDuringSnapshot = true
+      }
       if (item.kind === 'status') {
         if (board.cards.has(item.paneId)) {
           board = applyStatusEvent(board, item, now())
