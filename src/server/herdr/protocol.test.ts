@@ -227,6 +227,26 @@ describe('parseStreamLine', () => {
     })
   })
 
+  it('carries the title when the event has one', () => {
+    const line =
+      '{"data":{"agent_status":"working","pane_id":"wJ:p1","workspace_id":"wJ","title":"Fix bug"},"event":"pane.agent_status_changed"}'
+    expect(parseStreamLine(line)).toEqual({
+      kind: 'status',
+      paneId: 'wJ:p1',
+      workspaceId: 'wJ',
+      status: 'working',
+      title: 'Fix bug',
+    })
+  })
+
+  it('carries a null title and ignores a non-string title', () => {
+    const base = '"agent_status":"working","pane_id":"wJ:p1","workspace_id":"wJ"'
+    const nullTitle = `{"data":{${base},"title":null},"event":"pane.agent_status_changed"}`
+    const numberTitle = `{"data":{${base},"title":3},"event":"pane.agent_status_changed"}`
+    expect(parseStreamLine(nullTitle)).toMatchObject({ kind: 'status', title: null })
+    expect(parseStreamLine(numberTitle)).not.toHaveProperty('title')
+  })
+
   it('maps an unrecognised status to unknown', () => {
     const line =
       '{"data":{"agent_status":"sleeping","pane_id":"wJ:p1","workspace_id":"wJ"},"event":"pane.agent_status_changed"}'

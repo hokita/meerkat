@@ -33,7 +33,13 @@ export class HerdrProtocolError extends Error {
 
 export type StreamItem =
   | { kind: 'started' }
-  | { kind: 'status'; paneId: string; workspaceId: string; status: AgentStatus }
+  | {
+      kind: 'status'
+      paneId: string
+      workspaceId: string
+      status: AgentStatus
+      title?: string | null
+    }
   | { kind: 'topology' }
   | { kind: 'error'; code: string; message: string }
   | { kind: 'malformed' }
@@ -169,7 +175,15 @@ export function parseStreamLine(line: string): StreamItem {
     const paneId = asString(data['pane_id'])
     const workspaceId = asString(data['workspace_id'])
     if (paneId === null || workspaceId === null) return { kind: 'malformed' }
-    return { kind: 'status', paneId, workspaceId, status: parseStatus(data['agent_status']) }
+    const item: StreamItem = {
+      kind: 'status',
+      paneId,
+      workspaceId,
+      status: parseStatus(data['agent_status']),
+    }
+    const title = data['title']
+    if (title === null || typeof title === 'string') item.title = title
+    return item
   }
   return { kind: 'topology' }
 }

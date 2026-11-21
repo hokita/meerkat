@@ -57,13 +57,21 @@ export function boardFromSnapshot(
 
 export function applyStatusEvent(
   state: BoardState,
-  ev: { paneId: string; status: AgentStatus },
+  ev: { paneId: string; status: AgentStatus; title?: string | null },
   now: number
 ): BoardState {
   const card = state.cards.get(ev.paneId)
-  if (card === undefined || card.status === ev.status) return state
+  if (card === undefined) return state
+  const statusChanged = card.status !== ev.status
+  const title = ev.title === undefined ? card.title : ev.title
+  if (!statusChanged && title === card.title) return state
   const cards = new Map(state.cards)
-  cards.set(ev.paneId, { ...card, status: ev.status, since: now, sinceIsLowerBound: false })
+  cards.set(
+    ev.paneId,
+    statusChanged
+      ? { ...card, title, status: ev.status, since: now, sinceIsLowerBound: false }
+      : { ...card, title }
+  )
   return { cards }
 }
 

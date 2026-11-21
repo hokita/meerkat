@@ -145,6 +145,29 @@ describe('applyStatusEvent', () => {
     expect(state.cards.get('p1')?.status).toBe('working')
   })
 
+  it('updates the title even when the status is unchanged', () => {
+    const next = applyStatusEvent(state, { paneId: 'p1', status: 'working', title: 'New' }, 5000)
+    expect(next).not.toBe(state)
+    expect(next.cards.get('p1')).toMatchObject({
+      status: 'working',
+      title: 'New',
+      since: 1000,
+      sinceIsLowerBound: true,
+    })
+  })
+
+  it('updates the title alongside a status change', () => {
+    const next = applyStatusEvent(state, { paneId: 'p1', status: 'done', title: null }, 5000)
+    expect(next.cards.get('p1')).toMatchObject({ status: 'done', title: null, since: 5000 })
+  })
+
+  it('returns the same state when the title is unchanged', () => {
+    const titled = applyStatusEvent(state, { paneId: 'p1', status: 'working', title: 'T' }, 5000)
+    expect(applyStatusEvent(titled, { paneId: 'p1', status: 'working', title: 'T' }, 6000)).toBe(
+      titled
+    )
+  })
+
   it('returns the same state for unknown panes and unchanged statuses', () => {
     expect(applyStatusEvent(state, { paneId: 'nope', status: 'done' }, 5000)).toBe(state)
     expect(applyStatusEvent(state, { paneId: 'p1', status: 'working' }, 5000)).toBe(state)
