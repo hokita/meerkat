@@ -62,78 +62,136 @@ A is B plus recognition on top, so B is exactly A's fallback path.
 Input: `agent.read` (`recent_unwrapped`, text, ANSI stripped), sanitized as today, **120 lines** for
 recognition **(my call: long commands overflow 40)**; the drawer still shows the last 40.
 
+**Read size while blocked (found in Task 0).** Herdr refuses `agent.read` with more `lines` than the pane's
+viewport rows while the agent is `blocked` (`agent_not_idle`: "its alternate-screen history can only be
+captured by scrolling while idle"). With a 60-row pane, 60 lines worked and 61 failed. So for a `blocked`
+pane the reader asks for 120 lines and, on `agent_not_idle`, reads once more with `source: 'visible'` (the
+whole viewport, which always holds the dialog, since Claude Code draws it at the bottom). Any other error, or
+a second failure, gives `unrecognized` with no output, so nothing can be sent against it. The same limit hits
+card-progress's existing 120-line read on blocked panes; it fails there today and should use the same
+fallback.
+
 Evidence. Herdr 0.9.5's own Claude detection rules (`herdr agent explain <pane> --json`, read-only) classify
 `blocked` by these strings in the region after the last horizontal rule: `do you want to proceed?` with
 `esc to cancel` (permission), and the footer
 `Enter to select · ↑/↓ to navigate · Esc to cancel` (also `Enter to confirm · Esc to cancel`, and
-`arrow keys`/`↑↓` variants) for forms. The idle prompt box (observed live) is:
+`arrow keys`/`↑↓` variants) for forms. Every captured dialog fixture reads as `blocked` with
+`herdr agent explain --file <fixture> --agent claude`, and every idle fixture as `idle` (`live_prompt_box`).
+
+Real screens, captured on 2026-11-22 from Claude Code v2.1.323 in a scratch session (Task 0), are in
+`test-support/screens/*.txt`. Horizontal rules are the full terminal width there; they are shortened below.
+
+Idle prompt box (`idle-empty.txt`):
 
 ```
-✽ Spinner… (39s · ↓ 2.4k tokens)
+✻ Worked for 8s · done 21:48
 
 ──────────────────────────────────────────────
 ❯
 ──────────────────────────────────────────────
-  ⏵⏵ auto mode on · … · esc to interrupt · …
+  ⏸ manual mode on · ? for shortcuts · ← 1 agent
 ```
 
-No live session was showing a dialog while this was written, so the two dialog samples below are the shapes
-Claude Code renders, written from its UI and Herdr's rules. The builder's first task is to capture real
-fixtures (see Left to the builder) and adjust the parser to them, not the other way round.
-
-Permission prompt:
+Permission prompt, Bash (`permission-bash.txt`). The command sits between two dashed `╌` lines, which are not
+horizontal rules:
 
 ```
 ──────────────────────────────────────────────
  Bash command
-
-   npm test -- --run src/server
-   Run the server unit tests
-
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+ Create empty file made-by-bash.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ touch made-by-bash.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
  Do you want to proceed?
  ❯ 1. Yes
-   2. Yes, and don't ask again for npm test commands in /path/to/repo
-   3. No, and tell Claude what to do differently (esc)
+   2. Yes, and always allow access to /tmp/scratch from this project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
 
- Esc to cancel
+ Esc to cancel · Tab to amend
 ```
 
-Choice list (single question):
+Permission prompt, file create (`permission-edit.txt`):
 
 ```
 ──────────────────────────────────────────────
- ☐ Scope
+ Create file
+ notes.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 hi
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create notes.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)
+   3. No
 
- Which branch should the fix go on?
-
- ❯ 1. feat/reply
-      Keep it with the reply work
-   2. main
-      Hotfix straight to main
-   3. Type something.
-
- Enter to select · ↑/↓ to navigate · Esc to cancel
+ Esc to cancel · Tab to amend
 ```
 
-Rules. Take the block after the **last** horizontal rule (`─{3,}` line). A screen is recognized only if
-**all** hold; any miss gives `unrecognized`:
+Choice list, single question (`choice-single.txt`). A horizontal rule sits **inside** the dialog, between the
+last answer and the extra `Chat about this` option, so the dialog spans the last two rules:
+
+```
+──────────────────────────────────────────────
+ ☐ Color
+
+Which color should the note use?
+
+❯ 1. Red
+     A warm color
+  2. Blue
+     A cool color
+  3. Type something.
+──────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+```
+
+After the type-your-own number is pressed (`choice-type-focused.txt`) the marker moves to it and the footer
+becomes `Enter to select · ↑/↓ to navigate · ctrl+g to edit in Vim · Esc to cancel`; typed text replaces the
+label in place (`❯ 3. Medium please`, `choice-type-filled.txt`).
+
+Multi-select (`choice-multiselect.txt`): header line `←  ☐ Toppings  ✔ Submit  →`, options
+`❯ 1. [ ] Cheese`, an unnumbered `Submit` line. Two questions (`choice-tabbed.txt`): header line
+`←  ☐ Shape  ☐ Font  ✔ Submit  →`, footer `Enter to select · Tab/Arrow keys to navigate · Esc to cancel`.
+Folder trust at start (`trust.txt`): unnumbered options `❯ No, exit` / `Yes, I trust this folder`, footer
+`Enter to confirm · Esc to cancel`.
+
+Idle look-alikes: `idle-draft.txt` (`❯ half typed draft`), `idle-placeholder.txt` (a fresh session shows
+`❯ Try "fix lint errors"`), `idle-suggestion.txt` (after a turn Claude Code may show a suggested next prompt,
+`❯ ls -la made-by-bash.txt`), `prose-list-idle.txt` (a numbered list in Claude's reply, then an empty box).
+Placeholder and suggestion are dim (SGR 2) in the ANSI read but identical to a draft in the text read.
+
+Rules. A screen is recognized only if **all** hold; any miss gives `unrecognized`:
 
 1. Herdr's status for the pane is `blocked` (from the board), and the agent is `claude`.
-2. The block ends with a known footer (exact text, case-insensitive, whitespace-normalized): for a
-   permission prompt a bare `Esc to cancel` line; for a choice list one of the form footers above.
+2. The block is everything after the **last** horizontal rule (`─{3,}` line; `╌` lines are not rules). It ends
+   with a known footer (exact text, case-insensitive, whitespace-normalized): for a permission prompt
+   `Esc to cancel` or `Esc to cancel · Tab to amend`; for a choice list exactly
+   `Enter to select · ↑/↓ to navigate · Esc to cancel`. If the block's only option line is
+   `n. Chat about this`, the block is extended upward to the second-to-last rule (the inner rule is dropped),
+   and that must hold the rest of the dialog. Any other shape: `unrecognized`.
 3. Options are lines `^\s*(❯\s+)?(\d+)\.\s+(.+)$`, numbered `1..n` with no gaps, `n ≤ 9`, exactly one with the
    `❯` marker. Indented lines directly under an option are its description.
-4. **Permission** if the line just above the options is `Do you want to proceed?` or another
-   `Do you want to …?` question (edits/creates: `Do you want to make this edit to <file>?`). The request is
-   every line between the rule and that question: first non-blank line is the tool title (`Bash command`,
-   `Edit file`, …), the rest is shown verbatim in a `<pre>`. If the request is empty, `unrecognized`.
-5. **Choice** if a `☐ <header>` or no header is followed by a question line ending in `?`, then options. The
-   type-your-own option is the last option whose label is `Type something.` (or the builder's captured
-   equivalent). A `☒`/`✔` tab strip, `[ ]` checkboxes, or a `Submit` option means multi-question or
-   multi-select: `unrecognized`.
+4. **Permission** if the line just above the options is a question starting `Do you want to` and ending in
+   `?` (`Do you want to proceed?`, `Do you want to create notes.txt?`, `Do you want to make this edit to
+   <file>?`). The request is every line between the rule and that question: first non-blank line is the tool
+   title (`Bash command`, `Create file`, …), the rest (including `Tip:` lines and the `╌` lines) is shown
+   verbatim in a `<pre>`. If the request is empty, `unrecognized`.
+5. **Choice** if a header line that is exactly `☐ <header>` (one box, no `←`/`→`, no `✔`) or no header is
+   followed by a question line ending in `?`, then options. The type-your-own option is the last option
+   before `Chat about this` whose label is `Type something.`. `Chat about this` is shown as an ordinary
+   option. A tab strip (`←`, `→`, `✔`, more than one `☐`), `[ ]`/`[x]` checkboxes, or a `Submit` line means
+   multi-question or multi-select: `unrecognized`. The focused type-your-own state (footer with
+   `ctrl+g to edit in Vim`) is `unrecognized`, which is safe: `freeText` sends all its steps in one request.
 6. **Idle prompt** if Herdr's status is `idle` or `done` and the block after the second-to-last rule is a
    prompt box whose line starts with `❯` (empty or with the user's half-typed draft). A non-empty draft means
-   `unrecognized` **(my call: Meerkat must not append to text the user typed in the terminal)**.
+   `unrecognized` **(my call: Meerkat must not append to text the user typed in the terminal)**. The text read
+   cannot tell Claude Code's dim placeholder or suggestion from a draft, so those screens are `unrecognized`
+   too (fail safe; the user sees the keypad fallback). Telling them apart needs the ANSI read and is left out
+   of this version.
 7. Approving options: any permission option whose label starts with `Yes`, **and any label Meerkat doesn't
    know** (fail safe). Only labels starting with `No` skip the confirm.
 
@@ -150,6 +208,30 @@ The parser is a pure function `recognize(text, status, agent) → Prompt` with t
   agents. Followed by `agent.send_keys ["enter"]` only when the user taps Send.
 
 There is no `agent.send_text`. Not used: `pane.send_keys`, `pane.send_input`, `pane.run`, and everything else.
+
+### Verified in the scratch session (Task 0, 2026-11-22, Claude Code v2.1.323)
+
+- **A digit alone selects and submits.** Permission prompt: `send_keys ["1"]` ran the command at once,
+  `["4"]` (`No`) declined at once. Single-question choice list: `["2"]` answered `Blue` at once. No `enter`
+  is needed, so `option` stays `send_keys [String(n)]`. `["enter"]` on a permission prompt submits the
+  highlighted option.
+- **Type-your-own.** `send_keys ["3"]` on `3. Type something.` does not submit: it moves the marker there and
+  focuses the field. `pane.send_text "Medium please"` landed in the field as typed (no bracketed paste
+  needed), and `send_keys ["enter"]` submitted it (`→ Medium please`). The `freeText` sequence stands.
+- **Key names.** `1`–`9`, `enter`, `esc` are accepted (also `down`, `ctrl+u`). An unknown name fails the whole
+  call with `invalid_key` (`unsupported key notakey`) and nothing is written, even when valid keys precede
+  it. `esc` on a choice list declines it (`User declined to answer questions`).
+- **`agent.prompt`** on an `idle` or `done` session submits the text as one message, also when the box shows
+  a dim suggestion (the paste replaces it). On a `blocked` session it fails with `agent_blocked` and nothing
+  is sent.
+- **Success shapes** (raw socket, one JSON line): `agent.send_keys` and `pane.send_text` →
+  `{"id":"…","result":{"type":"ok"}}`; `agent.prompt` → `{"id":"…","result":{"type":"agent_prompted",
+  "agent":{…AgentInfo, agent_status, pane_id, terminal_id…}}}`. Errors →
+  `{"id":"…","error":{"code":"agent_blocked"|"invalid_key"|"agent_not_idle"|…,"message":"…"}}`. The CLI
+  prints the same envelope for `agent send-keys`/`agent prompt` and prints nothing for `pane send-text`.
+
+No send sequence and no confirm rule changed. Every `Yes…` option seen (`Yes, and always allow access…`,
+`Yes, and switch to auto mode…`, `Yes, and switch to accept edits…`) is approving under rule 7.
 
 ## Allow-list change
 
@@ -301,10 +383,11 @@ content types 415; the frame headers on `/`; the token differs between two serve
 - **Capture real fixtures first.** No dialog was on screen during design. Get one permission prompt, one
   single-question choice list (with descriptions and Type something), a multi-select, and a tabbed form from
   the scratch session below, via `agent.read`; strip any session content; check each with
-  `herdr agent explain --file <fixture> --agent claude` reads as `blocked`.
+  `herdr agent explain --file <fixture> --agent claude` reads as `blocked`. **Done in Task 0**: see
+  `test-support/screens/` and the samples above.
 - **Verify key behaviour in the scratch session:** whether a digit alone selects and submits in both dialog
   kinds, the exact key names Herdr accepts (`enter`, digits), and whether `pane.send_text` into the
-  type-your-own field needs bracketed paste.
+  type-your-own field needs bracketed paste. **Done in Task 0**: see "Verified in the scratch session".
 
 ## User's answers to the builder check (2026-11-22)
 
