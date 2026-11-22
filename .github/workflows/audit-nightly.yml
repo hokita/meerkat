@@ -1,0 +1,47 @@
+name: Audit (nightly)
+
+on:
+  schedule:
+    - cron: '20 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prod-audit:
+    name: Prod deps audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.3'
+      - run: npm audit --package-lock-only --omit=dev --audit-level=high
+
+  dev-audit:
+    name: Dev deps audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.3'
+      - run: npm audit --package-lock-only --audit-level=high
+
+  action-pins:
+    name: Action pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install PyYAML (hash-pinned)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pins"
+          "$RUNNER_TEMP/pins/bin/pip" install --require-hashes --only-binary=:all: --no-deps -r .github/scripts/requirements-pins.txt
+
+      - name: Test the pin checker
+        run: '"$RUNNER_TEMP/pins/bin/python" -m unittest discover -s .github/scripts -p "test_*.py"'
+
+      - name: Check action pins
+        run: '"$RUNNER_TEMP/pins/bin/python" .github/scripts/check_action_pins.py .github/workflows'

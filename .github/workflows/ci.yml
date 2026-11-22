@@ -11,8 +11,8 @@ jobs:
     name: Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24.22.3'
           cache: npm
@@ -27,17 +27,44 @@ jobs:
     name: E2E
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24.22.3'
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: failure()
         with:
           name: playwright-report
           path: e2e/playwright-report/
           retention-days: 7
+
+  prod-audit:
+    name: Prod deps audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.22.3'
+      - run: npm audit --package-lock-only --omit=dev --audit-level=high
+
+  action-pins:
+    name: Action pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install PyYAML (hash-pinned)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pins"
+          "$RUNNER_TEMP/pins/bin/pip" install --require-hashes --only-binary=:all: --no-deps -r .github/scripts/requirements-pins.txt
+
+      - name: Test the pin checker
+        run: '"$RUNNER_TEMP/pins/bin/python" -m unittest discover -s .github/scripts -p "test_*.py"'
+
+      - name: Check action pins
+        run: '"$RUNNER_TEMP/pins/bin/python" .github/scripts/check_action_pins.py .github/workflows'
