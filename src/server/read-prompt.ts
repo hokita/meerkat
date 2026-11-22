@@ -1,12 +1,12 @@
 import type { Card, Prompt, RecognizedPrompt } from '../shared/types.js'
 import { withFingerprint } from './fingerprint.js'
 import type { HerdrClient } from './herdr/client.js'
-import { HerdrProtocolError, parseReadResponse } from './herdr/protocol.js'
+import { parseReadResponse } from './herdr/protocol.js'
 import { sanitizeOutput } from './output.js'
 import { hasIdleBoxText, recognize } from './prompt.js'
+import { readScreen } from './read-screen.js'
 import type { Supervisor } from './supervisor.js'
 
-const RECOGNITION_LINES = 120
 const SHOWN_LINES = 40
 
 export interface ReadPromptOptions {
@@ -20,32 +20,16 @@ export interface PromptRead {
   prompt: Prompt
 }
 
-type Read = { kind: 'gone' } | { kind: 'ok'; text: string; truncated: boolean }
-
-async function readOnce(client: HerdrClient, params: object): Promise<Read> {
-  return parseReadResponse(await client.request('agent.read', params))
-}
-
-async function readScreen(client: HerdrClient, target: string): Promise<Read> {
-  const base = { target, format: 'text', strip_ansi: true }
-  try {
-    return await readOnce(client, { ...base, source: 'recent_unwrapped', lines: RECOGNITION_LINES })
-  } catch (error) {
-    if (error instanceof HerdrProtocolError && error.code === 'agent_not_idle') {
-      return readOnce(client, { ...base, source: 'visible' })
-    }
-    throw error
-  }
-}
-
 async function readAnsi(client: HerdrClient, target: string): Promise<string | null> {
   try {
-    const read = await readOnce(client, {
-      target,
-      source: 'visible',
-      format: 'ansi',
-      strip_ansi: false,
-    })
+    const read = parseReadResponse(
+      await client.request('agent.read', {
+        target,
+        source: 'visible',
+        format: 'ansi',
+        strip_ansi: false,
+      })
+    )
     return read.kind === 'ok' ? read.text : null
   } catch {
     return null
