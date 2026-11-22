@@ -140,6 +140,10 @@ function parseWorkspace(workspace: JsonObject): HerdrWorkspace | null {
   }
 }
 
+export function parseReplyResult(line: string, type: string): void {
+  resultOf(line, type)
+}
+
 export function parseSnapshotResponse(line: string): HerdrSnapshot {
   const result = resultOf(line, 'session_snapshot')
   const snapshot = result['snapshot']

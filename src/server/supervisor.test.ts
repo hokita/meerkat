@@ -5,7 +5,7 @@ import {
   startFakeHerdr,
   type FakeHerdr,
 } from '../../test-support/fake-herdr.js'
-import { ALLOWED_METHODS } from './herdr/allowlist.js'
+import { READ_METHODS } from './herdr/allowlist.js'
 import { createHerdrClient, type HerdrClient } from './herdr/client.js'
 import { createSupervisor, type Supervisor, type SupervisorState } from './supervisor.js'
 
@@ -591,6 +591,6 @@ describe('supervisor', () => {
 
   it('only ever asks Herdr for allow-listed methods', () => {
     expect(allReceived.length).toBeGreaterThan(0)
-    for (const method of allReceived) expect(ALLOWED_METHODS.has(method)).toBe(true)
+    for (const method of allReceived) expect(READ_METHODS.has(method)).toBe(true)
   })
 })
