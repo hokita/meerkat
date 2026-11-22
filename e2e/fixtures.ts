@@ -15,6 +15,7 @@ interface Fixtures {
 
 interface Options {
   initialSnapshot: unknown
+  initialReads: Record<string, string>
 }
 
 const STARTUP_TIMEOUT_MS = 15_000
@@ -60,8 +61,9 @@ async function stopChild(child: ChildProcess): Promise<void> {
 
 export const test = base.extend<Fixtures & Options>({
   initialSnapshot: [fakeSnapshot({ agents: [] }), { option: true }],
-  meerkat: async ({ initialSnapshot }, use) => {
-    const fake = await startFakeHerdr({ snapshot: initialSnapshot })
+  initialReads: [{}, { option: true }],
+  meerkat: async ({ initialSnapshot, initialReads }, use) => {
+    const fake = await startFakeHerdr({ snapshot: initialSnapshot, reads: initialReads })
     const port = readPort()
     const child = spawn(process.execPath, [MAIN_PATH], {
       stdio: ['ignore', 'pipe', 'pipe'],
