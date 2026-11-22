@@ -1,4 +1,4 @@
-import type { Prompt, RecognizedPrompt } from '../shared/types.js'
+import type { Card, Prompt, RecognizedPrompt } from '../shared/types.js'
 import { withFingerprint } from './fingerprint.js'
 import type { HerdrClient } from './herdr/client.js'
 import { HerdrProtocolError, parseReadResponse } from './herdr/protocol.js'
@@ -52,10 +52,14 @@ async function readAnsi(client: HerdrClient, target: string): Promise<string | n
   }
 }
 
+function sameSession(before: Card, after: Card): boolean {
+  return before.statusEpoch === after.statusEpoch && before.terminalId === after.terminalId
+}
+
 export async function readPrompt(
   opts: ReadPromptOptions,
   paneId: string
-): Promise<PromptRead | 'gone'> {
+): Promise<PromptRead | 'gone' | 'changed'> {
   const card = opts.supervisor.card(paneId)
   if (card === undefined) return 'gone'
   const read = await readScreen(opts.client, paneId)
@@ -68,6 +72,9 @@ export async function readPrompt(
     const ansi = await readAnsi(opts.client, paneId)
     if (ansi !== null) recognized = recognize(text, card.status, card.agent, ansi)
   }
+  const after = opts.supervisor.card(paneId)
+  if (after === undefined) return 'gone'
+  if (!sameSession(card, after)) return 'changed'
   const prompt = withFingerprint(
     { paneId: card.paneId, terminalId: card.terminalId, statusEpoch: card.statusEpoch, text },
     recognized

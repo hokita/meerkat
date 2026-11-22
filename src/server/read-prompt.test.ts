@@ -55,8 +55,13 @@ function setup(current: Card | undefined, respond: Responder) {
       throw new Error('unused')
     },
   }
-  const supervisor = { card: () => current }
-  return { opts: { client, supervisor }, calls }
+  const holder = { card: current }
+  const supervisor = { card: () => holder.card }
+  return { opts: { client, supervisor }, calls, holder }
+}
+
+function moved(status: Card['status'], change: Partial<Card> = {}): Card {
+  return { ...card(status), statusEpoch: 4, ...change }
 }
 
 describe('readPrompt', () => {
@@ -74,7 +79,7 @@ describe('readPrompt', () => {
   it('recognizes a permission prompt from a 120-line read with a fingerprint', async () => {
     const { opts, calls } = setup(card('blocked'), () => readLine(screen('permission-bash.txt')))
     const result = await readPrompt(opts, 'w1:p1')
-    if (result === 'gone') throw new Error('gone')
+    if (typeof result === 'string') throw new Error(result)
     expect(result.prompt.kind).toBe('permission')
     expect(result.prompt.kind === 'permission' && result.prompt.fingerprint).toMatch(
       /^[0-9a-f]{64}$/
@@ -94,7 +99,7 @@ describe('readPrompt', () => {
   it('returns none for a working card', async () => {
     const { opts } = setup(card('working'), () => readLine(screen('permission-bash.txt')))
     const result = await readPrompt(opts, 'w1:p1')
-    if (result === 'gone') throw new Error('gone')
+    if (typeof result === 'string') throw new Error(result)
     expect(result.prompt).toEqual({ kind: 'none' })
   })
 
@@ -105,7 +110,7 @@ describe('readPrompt', () => {
         : errorLine('agent_not_idle')
     )
     const result = await readPrompt(opts, 'w1:p1')
-    if (result === 'gone') throw new Error('gone')
+    if (typeof result === 'string') throw new Error(result)
     expect(result.prompt.kind).toBe('permission')
     expect(calls[1]).toEqual({
       target: 'w1:p1',
@@ -127,7 +132,7 @@ describe('readPrompt', () => {
         : readLine(suggestionScreen())
     )
     const result = await readPrompt(opts, 'w1:p1')
-    if (result === 'gone') throw new Error('gone')
+    if (typeof result === 'string') throw new Error(result)
     expect(result.prompt.kind).toBe('idle')
     expect(calls[1]).toEqual({
       target: 'w1:p1',
@@ -142,7 +147,7 @@ describe('readPrompt', () => {
       p['format'] === 'ansi' ? errorLine('boom') : readLine(suggestionScreen())
     )
     const result = await readPrompt(opts, 'w1:p1')
-    if (result === 'gone') throw new Error('gone')
+    if (typeof result === 'string') throw new Error(result)
     expect(result.prompt.kind).toBe('unrecognized')
   })
 
@@ -151,7 +156,7 @@ describe('readPrompt', () => {
       p['format'] === 'ansi' ? errorLine('agent_not_found') : readLine(suggestionScreen())
     )
     const result = await readPrompt(opts, 'w1:p1')
-    if (result === 'gone') throw new Error('gone')
+    if (typeof result === 'string') throw new Error(result)
     expect(result.prompt.kind).toBe('unrecognized')
   })
 
@@ -159,10 +164,43 @@ describe('readPrompt', () => {
     const text = Array.from({ length: 100 }, (_, i) => `line ${i}`).join('\n')
     const { opts } = setup(card('idle'), () => readLine(text))
     const result = await readPrompt(opts, 'w1:p1')
-    if (result === 'gone') throw new Error('gone')
+    if (typeof result === 'string') throw new Error(result)
     const lines = result.text.split('\n')
     expect(lines).toHaveLength(40)
     expect(lines.at(-1)).toBe('line 99')
     expect(result.truncated).toBe(true)
+  })
+
+  it('answers changed when the status epoch moves during the screen read', async () => {
+    const { opts, holder } = setup(card('blocked'), () => {
+      holder.card = moved('working')
+      return readLine(screen('permission-bash.txt'))
+    })
+    expect(await readPrompt(opts, 'w1:p1')).toBe('changed')
+  })
+
+  it('answers changed when the terminal changes during the screen read', async () => {
+    const { opts, holder } = setup(card('blocked'), () => {
+      holder.card = { ...card('blocked'), terminalId: 't2' }
+      return readLine(screen('permission-bash.txt'))
+    })
+    expect(await readPrompt(opts, 'w1:p1')).toBe('changed')
+  })
+
+  it('answers changed when the status epoch moves during the ANSI read', async () => {
+    const { opts, holder } = setup(card('idle'), (p) => {
+      if (p['format'] !== 'ansi') return readLine(suggestionScreen())
+      holder.card = moved('done')
+      return readLine(screen('idle-suggestion.ansi.txt'))
+    })
+    expect(await readPrompt(opts, 'w1:p1')).toBe('changed')
+  })
+
+  it('answers gone when the card disappears during the screen read', async () => {
+    const { opts, holder } = setup(card('blocked'), () => {
+      holder.card = undefined
+      return readLine(screen('permission-bash.txt'))
+    })
+    expect(await readPrompt(opts, 'w1:p1')).toBe('gone')
   })
 })

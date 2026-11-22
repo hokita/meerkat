@@ -20,7 +20,7 @@ export interface ReplyMemory {
 
 export interface ReplyDeps {
   supervisor: Pick<Supervisor, 'current' | 'recordReply' | 'markSent' | 'refreshProgress'>
-  read: (paneId: string) => Promise<PromptRead | 'gone'>
+  read: (paneId: string) => Promise<PromptRead | 'gone' | 'changed'>
   sender: ReplySender
   memory: ReplyMemory
 }
@@ -184,13 +184,14 @@ async function answer(
   fingerprint: string,
   action: ReplyAction
 ): Promise<Outcome> {
-  let read: PromptRead | 'gone'
+  let read: PromptRead | 'gone' | 'changed'
   try {
     read = await deps.read(paneId)
   } catch (error) {
     return { result: herdrError(error, 0), sent: 0, summary: null, uncertain: false }
   }
   if (read === 'gone') return refusal(404, { error: 'session_closed' })
+  if (read === 'changed') return refusal(409, { error: 'session_changed' })
   const { prompt } = read
   if (prompt.kind === 'none') return refusal(409, { error: 'not_waiting' })
   if (prompt.fingerprint !== fingerprint) {

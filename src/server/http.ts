@@ -138,6 +138,10 @@ async function serveOutput(
       sendJson(res, 404, { error: 'session_closed' })
       return
     }
+    if (result === 'changed') {
+      sendJson(res, 409, { error: 'session_changed' })
+      return
+    }
     sendJson(res, 200, result)
   } catch {
     sendJson(res, 502, { error: 'herdr_error' })

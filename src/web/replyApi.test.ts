@@ -76,6 +76,11 @@ describe('sendReply', () => {
 
   it.each([
     [409, { error: 'not_waiting' }, 'The session is working again; nothing was sent'],
+    [
+      409,
+      { error: 'session_changed' },
+      'The session changed while Meerkat was reading it; nothing was sent',
+    ],
     [400, { error: 'invalid_action' }, 'Meerkat refused this reply (invalid_action)'],
     [400, { error: 'invalid_body' }, 'Meerkat refused this reply (invalid_body)'],
     [404, { error: 'session_closed' }, 'Session closed'],

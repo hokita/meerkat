@@ -129,6 +129,9 @@ function resultFor(status: number, body: unknown): ReplyResult {
   if (status === 409 && error === 'not_waiting') {
     return failed('The session is working again; nothing was sent')
   }
+  if (status === 409 && error === 'session_changed') {
+    return failed('The session changed while Meerkat was reading it; nothing was sent')
+  }
   if (status === 400) return failed(`Meerkat refused this reply (${String(error)})`)
   if (status === 404) return failed('Session closed')
   if (status === 503) return failed('Herdr is not reachable; nothing was sent')

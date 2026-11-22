@@ -447,6 +447,23 @@ describe('GET /api/sessions/:id/output', () => {
     expect(body.text.length).toBe(65536)
   })
 
+  it('answers 409 session_changed when the card moves on during the read', async () => {
+    const h = await outputHarness('w2:p1')
+    h.fake.setRead('w2:p1', screen('permission-bash.txt'))
+    const look = h.stub.card
+    let looks = 0
+    h.stub.card = (paneId) => {
+      looks += 1
+      const found = look(paneId)
+      return looks > 1 && found !== undefined
+        ? { ...found, statusEpoch: found.statusEpoch + 1 }
+        : found
+    }
+    const reply = await get(h, '/api/sessions/w2:p1/output')
+    expect(reply.status).toBe(409)
+    expect(JSON.parse(reply.body)).toEqual({ error: 'session_changed' })
+  })
+
   it('accepts a percent-encoded pane id', async () => {
     const h = await outputHarness('w1H:p1')
     const reply = await get(h, '/api/sessions/w1H%3Ap1/output')

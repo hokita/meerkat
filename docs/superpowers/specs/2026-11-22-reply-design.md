@@ -272,7 +272,8 @@ No send sequence and no confirm rule changed. Every `Yes…` option seen (`Yes, 
 - Text: 1–4000 chars after trimming; no control characters; newlines allowed only for `prompt`
   **(my call: a newline typed into a dialog may submit it early)**.
 - Responses: `200 {sent}`; `409 {error: 'prompt_changed', prompt}` with the fresh prompt;
-  `409 {error: 'not_waiting'}` (status is `working`); `400` bad body or action not valid for the prompt kind
+  `409 {error: 'not_waiting'}` (status is `working`); `409 {error: 'session_changed'}` (the card's epoch or
+  terminal changed while the pane was being read); `400` bad body or action not valid for the prompt kind
   (e.g. `option 4` of 3); `403` token/Origin/header failure; `404 session_closed`; `503 herdr_unreachable`;
   `502 herdr_error` (with Herdr's code, e.g. `agent_blocked`); `415` non-JSON.
 - The server accepts `POST` on this route only; every other non-GET still gets `405`.
@@ -316,6 +317,12 @@ content types 415; the frame headers on `/`; the token differs between two serve
   recomputes the fingerprint, and sends only if it equals the one in the request and the action fits the
   fresh prompt. Otherwise `409 prompt_changed` and the UI swaps in the new prompt. For `prompt` (idle) the
   status must also still be `idle` or `done`; `agent.prompt` itself refuses `blocked`.
+- **Card re-checked after the reads (user's decision, 2026-11-23).** The pane reads (the text read and, for
+  an idle box, the ANSI read) are asynchronous, so a status event can move the card on while they are in
+  flight. After the reads Meerkat fetches the card again; if it is gone the answer is `404`, and if its status
+  epoch or `terminal_id` differs from the card the read started with, the reply is refused with
+  `409 session_changed` before anything is sent. The output route answers the same `409`; the drawer reloads
+  when the new epoch reaches the browser.
 - **Right session.** Target is the pane id from the URL, validated by the existing regex and matched against a
   card on the board with the same `terminal_id`. `agent.*` calls use the pane id as target.
 - **Double taps.** `replyId` is a client UUID. The server remembers results for the last 5 minutes per pane
@@ -374,6 +381,7 @@ content types 415; the frame headers on `/`; the token differs between two serve
 | Case | Behaviour |
 |---|---|
 | Prompt changed / answered in the terminal | 409, new prompt shown, nothing sent |
+| Status or terminal changes while the pane is being read | 409 `session_changed`, nothing sent |
 | Session closed between read and tap | 404, drawer says "Session closed" (existing) |
 | Herdr down | 503, reply controls disabled with the disconnected banner |
 | Herdr rejects keys or `agent_blocked` | 502 with Herdr's code shown; nothing retried |
