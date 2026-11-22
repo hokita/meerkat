@@ -12,6 +12,13 @@ if [ "${#files[@]}" -eq 0 ]; then
   exit 1
 fi
 
+status=0
+matches="$(grep -nHE '^[[:space:]]*(-[[:space:]]+)?uses:' "${files[@]}")" || status=$?
+if [ "$status" -gt 1 ]; then
+  echo "could not read workflow files in $dir"
+  exit 1
+fi
+
 bad=0
 while IFS= read -r line; do
   [ -z "$line" ] && continue
@@ -28,7 +35,7 @@ while IFS= read -r line; do
     echo "unpinned action: $location: ${text#"${text%%[![:space:]]*}"}"
     bad=1
   fi
-done < <(grep -nHE '^[[:space:]]*(-[[:space:]]+)?uses:' "${files[@]}" || true)
+done <<<"$matches"
 
 if [ "$bad" -ne 0 ]; then
   echo "Some actions are not pinned by a full commit SHA"

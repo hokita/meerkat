@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -75,5 +75,18 @@ describe('check-action-pins.sh', () => {
     const result = run()
     expect(result.status).toBe(1)
     expect(result.stdout).toContain('no workflow files')
+  })
+
+  it('fails when a workflow file cannot be read', () => {
+    const file = join(dir, 'x.yml')
+    writeFileSync(file, workflow('actions/checkout@v4'))
+    chmodSync(file, 0o000)
+    try {
+      const result = run()
+      expect(result.status).toBe(1)
+      expect(result.stdout).not.toContain('All actions are pinned by SHA')
+    } finally {
+      chmodSync(file, 0o644)
+    }
   })
 })
