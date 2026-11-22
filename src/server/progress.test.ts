@@ -94,4 +94,10 @@ describe('extractProgress', () => {
   it('keeps a list in the first paragraph', () => {
     expect(extractProgress('⏺ Done:\n  - parser\n  - poller')).toBe('Done: - parser - poller')
   })
+
+  it('treats a bare marker as a block without text', () => {
+    expect(extractProgress('⏺')).toBeNull()
+    expect(extractProgress('npm output\n⏺')).toBeNull()
+    expect(extractProgress('⏺ Done.\n\n⏺')).toBe('Done.')
+  })
 })

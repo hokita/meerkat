@@ -1,6 +1,6 @@
 export const MAX_PROGRESS_CHARS = 280
 
-const MARKER = '⏺ '
+const MARKER = '⏺'
 const RESULT_MARKER = '⎿'
 const TOOL_CALL_HEAD = /^[A-Za-z][\w-]*\(/
 const BOX_DRAWING_ONLY = /^[─-╿ ]+$/
@@ -12,6 +12,10 @@ function normalizeLine(line: string): string {
 
 function isResultLine(line: string): boolean {
   return line.trim().startsWith(RESULT_MARKER)
+}
+
+function isMarkerLine(line: string): boolean {
+  return line === MARKER || line.startsWith(MARKER + ' ')
 }
 
 function isChrome(line: string): boolean {
@@ -41,7 +45,7 @@ interface Block {
 }
 
 function readBlock(lines: string[], start: number): Block {
-  const head = (lines[start] ?? '').slice(MARKER.length)
+  const head = (lines[start] ?? '').slice(MARKER.length).trim()
   const parts = [head]
   let next = start + 1
   while (next < lines.length) {
@@ -62,11 +66,11 @@ export function extractProgress(text: string): string | null {
   const lines = text.split('\n').map(normalizeLine)
   const blocks: Block[] = []
   lines.forEach((line, index) => {
-    if (line.startsWith(MARKER)) blocks.push(readBlock(lines, index))
+    if (isMarkerLine(line)) blocks.push(readBlock(lines, index))
   })
   if (blocks.length > 0) {
-    const last = blocks.findLast((block) => !block.isToolCall)
-    return last && last.text !== '' ? cap(last.text) : null
+    const last = blocks.findLast((block) => !block.isToolCall && block.text !== '')
+    return last ? cap(last.text) : null
   }
   const fallback = lines.findLast((line) => line.trim() !== '' && !isChrome(line))
   return fallback === undefined ? null : cap(collapse(fallback))
