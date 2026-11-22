@@ -1,3 +1,5 @@
+import { sanitizeOutput } from './output.js'
+
 export const MARKER = '❯'
 
 const RULE = /^─{3,}$/
@@ -170,20 +172,27 @@ function parseAnsi(ansi: string): Cell[][] | null {
   return lines
 }
 
+function boxRegion(ansi: string): string | null {
+  const raw = ansi.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line))
+  const rules = ruleIndices(screenLines(raw.map((line) => sanitizeOutput(line).text).join('\n')))
+  const last = rules.at(-1)
+  const previous = rules.at(-2)
+  if (last === undefined || previous === undefined || previous + 2 !== last) return null
+  return raw.slice(previous, last + 1).join('\n')
+}
+
 export function ansiBoxIsFaint(ansi: string, boxText: string): boolean {
-  const cells = parseAnsi(ansi)
-  if (cells === null) return false
+  const region = boxRegion(ansi)
+  const cells = region === null ? null : parseAnsi(region)
+  if (cells === null || cells.length !== 3) return false
   const lines = cells.map((line) =>
     line
       .map((cell) => cell.char)
       .join('')
       .trimEnd()
   )
-  const rules = ruleIndices(lines)
-  const last = rules.at(-1)
-  const previous = rules.at(-2)
-  if (last === undefined || previous === undefined || previous + 2 !== last) return false
-  const box = cells[previous + 1] ?? []
+  if (!isRule(lines[0] ?? '') || !isRule(lines[2] ?? '')) return false
+  const box = cells[1] ?? []
   if (box[0]?.char !== MARKER) return false
   const after = box.slice(1)
   if (collapse(after.map((cell) => cell.char).join('')) !== boxText) return false

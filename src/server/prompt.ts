@@ -11,7 +11,7 @@ import {
   trimBlankEdges,
 } from './prompt-blocks.js'
 
-const PERMISSION_FOOTERS = new Set(['esc to cancel', 'esc to cancel · tab to amend'])
+const PERMISSION_FOOTER = 'esc to cancel · tab to amend'
 const CHOICE_FOOTER = 'enter to select · ↑/↓ to navigate · esc to cancel'
 const CHAT_LABEL = 'Chat about this'
 const FREE_TEXT_LABEL = 'Type something.'
@@ -109,7 +109,7 @@ function choice(body: string[]): RecognizedPrompt | null {
 function recognizeDialog(lines: string[]): RecognizedPrompt | null {
   const dialog = readDialog(lines)
   if (!dialog) return null
-  if (PERMISSION_FOOTERS.has(dialog.footer)) return permission(dialog.body)
+  if (dialog.footer === PERMISSION_FOOTER) return permission(dialog.body)
   if (dialog.footer === CHOICE_FOOTER) return choice(dialog.body)
   return null
 }

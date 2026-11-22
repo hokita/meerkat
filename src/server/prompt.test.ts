@@ -112,11 +112,20 @@ describe('recognize: permission prompts', () => {
     expect(prompt.options[3]?.approving).toBe(true)
   })
 
-  it('accepts the plain Esc to cancel footer', () => {
+  it('is unrecognized for a bare Esc to cancel footer', () => {
     const text = edit(
       screen('permission-bash.txt'),
       'Esc to cancel · Tab to amend',
       'Esc to cancel'
+    )
+    expect(recognize(text, 'blocked', 'claude').kind).toBe('unrecognized')
+  })
+
+  it('accepts the observed footer in any case and spacing', () => {
+    const text = edit(
+      screen('permission-bash.txt'),
+      'Esc to cancel · Tab to amend',
+      'esc  to cancel ·  TAB to amend'
     )
     expect(recognize(text, 'blocked', 'claude').kind).toBe('permission')
   })
@@ -496,6 +505,31 @@ describe('recognize: dim suggestion in the box (ANSI)', () => {
     const rule = '─'.repeat(40)
     const draft = `${rule}\r\n❯ half typed draft\r\n${rule}\r\n`
     expect(recognize(screen('idle-draft.txt'), 'idle', 'claude', draft).kind).toBe('unrecognized')
+  })
+
+  const osc8 = `${ESC}]8;;https://example.com${ESC}\\link${ESC}]8;;${ESC}\\`
+  const unknownSgr = `${ESC}[73mraised${ESC}[0m`
+
+  it('ignores unsupported sequences above the box', () => {
+    const noisy = `earlier ${osc8} and ${unknownSgr}\r\n${ESC}[?25l\r\n${ansi}`
+    expect(recognize(suggestionText, 'idle', 'claude', noisy)).toEqual({ kind: 'idle' })
+  })
+
+  it('is unrecognized for an OSC 8 link inside the box', () => {
+    const inside = ansi.replace('run the tests again', `run the tests ${osc8}`)
+    const text = edit(suggestionText, 'run the tests again', 'run the tests link')
+    expect(recognize(text, 'idle', 'claude', inside).kind).toBe('unrecognized')
+  })
+
+  it('is unrecognized for an unknown SGR code inside the box', () => {
+    const inside = ansi.replace('run the tests again', `run the tests ${ESC}[73magain`)
+    expect(recognize(suggestionText, 'idle', 'claude', inside).kind).toBe('unrecognized')
+  })
+
+  it('does not carry faint into the box from above the rule', () => {
+    const plain = ansi.replace(`${ESC}[2m`, '').replace(`${ESC}[0m\r\n❯`, '\r\n❯')
+    const leaking = `${ESC}[2m\r\n${plain.replaceAll(`${ESC}[0m`, '')}`
+    expect(recognize(suggestionText, 'idle', 'claude', leaking).kind).toBe('unrecognized')
   })
 
   it('ignores the ANSI read when the box is empty', () => {

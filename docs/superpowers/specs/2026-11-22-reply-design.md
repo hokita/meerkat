@@ -174,7 +174,7 @@ Rules. A screen is recognized only if **all** hold; any miss gives `unrecognized
 1. Herdr's status for the pane is `blocked` (from the board), and the agent is `claude`.
 2. The block is everything after the **last** horizontal rule (`─{3,}` line; `╌` lines are not rules). It ends
    with a known footer (exact text, case-insensitive, whitespace-normalized): for a permission prompt
-   `Esc to cancel` or `Esc to cancel · Tab to amend`; for a choice list exactly
+   exactly `Esc to cancel · Tab to amend` (a bare `Esc to cancel` is unrecognized); for a choice list exactly
    `Enter to select · ↑/↓ to navigate · Esc to cancel`. If the block's only option line is
    `n. Chat about this`, the block is extended upward to the second-to-last rule (the inner rule is dropped),
    and that must hold the rest of the dialog. Any other shape: `unrecognized`.
