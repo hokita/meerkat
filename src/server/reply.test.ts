@@ -98,7 +98,7 @@ function setup(opts: SetupOptions = {}) {
     supervisor: {
       current: () => ({
         herdr: opts.herdr ?? 'connected',
-        board: { attention: [], working: [], idle: [] },
+        board: { waiting: [], done: [], working: [], idle: [] },
       }),
       recordReply: (paneId, summary) => {
         replies.push([paneId, summary])

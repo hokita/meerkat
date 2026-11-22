@@ -11,7 +11,8 @@ const UNNAMED = '(unnamed)'
 export const REPLY_VISIBLE_MS = 600_000
 
 export function columnOf(status: AgentStatus): Column {
-  if (status === 'done' || status === 'blocked') return 'attention'
+  if (status === 'blocked') return 'waiting'
+  if (status === 'done') return 'done'
   if (status === 'working') return 'working'
   return 'idle'
 }
@@ -161,9 +162,10 @@ function compareText(a: string, b: string): number {
 }
 
 export function toView(state: BoardState): BoardView {
-  const view: BoardView = { attention: [], working: [], idle: [] }
+  const view: BoardView = { waiting: [], done: [], working: [], idle: [] }
   for (const card of state.cards.values()) view[columnOf(card.status)].push(card)
-  view.attention.sort(bySince)
+  view.waiting.sort(bySince)
+  view.done.sort(bySince)
   view.working.sort(bySince)
   view.idle.sort(byName)
   return view

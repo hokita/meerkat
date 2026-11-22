@@ -19,11 +19,11 @@ afterEach(async () => {
   while (cleanups.length > 0) await cleanups.pop()?.()
 })
 
-const emptyBoard: BoardView = { attention: [], working: [], idle: [] }
+const emptyBoard: BoardView = { waiting: [], done: [], working: [], idle: [] }
 
 function boardWith(paneId: string): BoardView {
   return {
-    attention: [
+    waiting: [
       {
         paneId,
         workspaceId: 'w1',
@@ -40,6 +40,7 @@ function boardWith(paneId: string): BoardView {
         lastReply: null,
       },
     ],
+    done: [],
     working: [],
     idle: [],
   }
@@ -66,7 +67,8 @@ function stubSupervisor(state: SupervisorState): Stub {
     current: () => stub.state,
     card: (paneId) => {
       const found = [
-        ...stub.state.board.attention,
+        ...stub.state.board.waiting,
+        ...stub.state.board.done,
         ...stub.state.board.working,
         ...stub.state.board.idle,
       ]
@@ -96,7 +98,8 @@ function stubSupervisor(state: SupervisorState): Stub {
       stub.state = {
         ...stub.state,
         board: {
-          attention: bump(board.attention),
+          waiting: bump(board.waiting),
+          done: bump(board.done),
           working: bump(board.working),
           idle: bump(board.idle),
         },
@@ -380,11 +383,11 @@ describe('GET /api/events', () => {
 
 function outputHarness(paneId: string, status: 'blocked' | 'working' | 'idle' = 'blocked') {
   const board = boardWith(paneId)
-  const card = board.attention[0] as Card
+  const card = board.waiting[0] as Card
   return harness({
     state: {
       herdr: 'connected',
-      board: { attention: [], working: [], idle: [{ ...card, status }] },
+      board: { waiting: [], done: [], working: [], idle: [{ ...card, status }] },
     },
   })
 }
