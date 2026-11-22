@@ -5,7 +5,7 @@ import {
   startFakeHerdr,
   type FakeHerdr,
 } from '../../test-support/fake-herdr.js'
-import { ALLOWED_METHODS } from './herdr/allowlist.js'
+import { READ_METHODS } from './herdr/allowlist.js'
 import { createHerdrClient, type HerdrClient } from './herdr/client.js'
 import { createSupervisor, type Supervisor, type SupervisorState } from './supervisor.js'
 
@@ -489,6 +489,67 @@ describe('supervisor', () => {
     await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(2))
   })
 
+  it('records a reply on the card, publishes it and expires it on the reconcile tick', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    let clock = 1000
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), {
+      reconcileMs: 50,
+      now: () => clock,
+    })
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')).toBeDefined())
+    expect(supervisor.card('nope')).toBeUndefined()
+    const published: unknown[] = []
+    supervisor.onChange((state) => published.push(state))
+    supervisor.recordReply('wJ:p1', 'Yes')
+    expect(supervisor.card('wJ:p1')?.lastReply).toEqual({ summary: 'Yes', at: 1000, epoch: 0 })
+    expect(cardOf(supervisor, 'wJ:p1')?.lastReply?.summary).toBe('Yes')
+    expect(published).toHaveLength(1)
+    clock = 1000 + 600_000
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')?.lastReply).toBeNull())
+  })
+
+  it('markSent bumps the card epoch, keeps the reply and publishes', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')).toBeDefined())
+    supervisor.recordReply('wJ:p1', 'Yes')
+    const before = supervisor.card('wJ:p1')?.statusEpoch ?? -1
+    const published: unknown[] = []
+    supervisor.onChange((state) => published.push(state))
+    supervisor.markSent('wJ:p1')
+    expect(supervisor.card('wJ:p1')?.statusEpoch).toBeGreaterThan(before)
+    expect(supervisor.card('wJ:p1')?.lastReply?.summary).toBe('Yes')
+    expect(published).toHaveLength(1)
+    supervisor.markSent('nope')
+    expect(published).toHaveLength(1)
+  })
+
+  it('does not publish a reply for an unknown pane', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')).toBeDefined())
+    const published: unknown[] = []
+    supervisor.onChange((state) => published.push(state))
+    supervisor.recordReply('nope', 'Yes')
+    expect(published).toHaveLength(0)
+  })
+
+  it('keeps status epochs increasing across an observation gap', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')).toBeDefined())
+    const before = supervisor.card('wJ:p1')?.statusEpoch ?? -1
+    await fake.stop()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('disconnected'))
+    await fake.restart()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
+    expect(supervisor.card('wJ:p1')?.statusEpoch).toBeGreaterThan(before)
+  })
+
   it('stop closes the subscription and makes no further requests', async () => {
     const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'working' })])
     fake.setRead('wJ:p1', '⏺ Halfway there.')
@@ -535,6 +596,23 @@ describe('supervisor', () => {
         text: 'Almost done.',
         sinceIsLowerBound: false,
       })
+    )
+  })
+
+  it('refreshProgress re-reads a card at once', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), {
+      progressIntervalMs: 60_000,
+    })
+    supervisor.start()
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Halfway there.')
+    )
+    fake.setRead('wJ:p1', '⏺ Answered from Meerkat.')
+    supervisor.refreshProgress('wJ:p1')
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Answered from Meerkat.')
     )
   })
 
@@ -591,6 +669,6 @@ describe('supervisor', () => {
 
   it('only ever asks Herdr for allow-listed methods', () => {
     expect(allReceived.length).toBeGreaterThan(0)
-    for (const method of allReceived) expect(ALLOWED_METHODS.has(method)).toBe(true)
+    for (const method of allReceived) expect(READ_METHODS.has(method)).toBe(true)
   })
 })

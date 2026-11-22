@@ -29,6 +29,8 @@ still working (and for how long), and which are idle, kept live without reloadin
 
 ## Non-goals
 
+> Update 2026-11-22: sending input to agents is now built, narrowly. See `2026-11-22-reply-design.md`. The list below is the original.
+
 - Phone or other-device access. **Considered and declined by the user on 2026-11-21** (see Approaches → Access).
 - Sign-in or accounts.
 - Sending prompts, keys, or any other input to agents; focusing, starting, closing, splitting or killing anything.
@@ -40,7 +42,7 @@ still working (and for how long), and which are idle, kept live without reloadin
 
 ## Anti-goals (a failure even if it works)
 
-- Meerkat changes anything in Herdr. It is strictly read-only.
+- Meerkat changes anything in Herdr. It is strictly read-only. (Superseded 2026-11-22: Meerkat can now send three methods from the reply endpoint only; see `2026-11-22-reply-design.md`.)
 - Another website open in the user's browser can read session names, paths or terminal output from Meerkat.
 - Terminal output is rendered as HTML, or escape sequences reach the page and change how it looks.
 - Meerkat quietly shows stale state as if it were live (for example, after Herdr went away).
@@ -152,7 +154,7 @@ Meerkat maps that to "session closed".
 The Herdr client sends only these methods: `session.snapshot`, `events.subscribe`, `events.wait`, `agent.list`,
 `agent.get`, `agent.read`. Anything else is refused **before any socket is opened**, and a unit test covers it with
 every mutating method in the schema (`agent.prompt`, `agent.start`, `agent.send_keys`, `pane.close`,
-`pane.split`, `pane.focus`, `server.stop`, ...). The full method list (109 methods) is in `herdr api schema --json`.
+`pane.split`, `pane.focus`, `server.stop`, ...). The full method list (109 methods; 102 in herdr 0.9.5's current schema) is in `herdr api schema --json`.
 
 ## Approaches
 

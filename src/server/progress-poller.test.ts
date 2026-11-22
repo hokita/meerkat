@@ -381,6 +381,40 @@ describe('createProgressPoller', () => {
     await stopping
     expect(stopped).toBe(true)
   })
+  it('refresh reads a known pane at once', async () => {
+    const { poller, calls, pending, progress } = setup()
+    active = poller
+    poller.sync([{ paneId: 'a', status: 'blocked' }])
+    await settle()
+    pending[0]!.resolve('first')
+    await settle()
+    poller.refresh('a')
+    await settle()
+    expect(calls).toEqual(['a', 'a'])
+    pending[1]!.resolve('after reply')
+    await settle()
+    expect(progress.at(-1)).toEqual(['a', 'after reply'])
+  })
+
+  it('refresh ignores an unknown pane', async () => {
+    const { poller, calls } = setup()
+    active = poller
+    poller.refresh('nope')
+    await settle()
+    expect(calls).toEqual([])
+  })
+
+  it('refresh does nothing after stop', async () => {
+    const { poller, calls, pending } = setup()
+    poller.sync([{ paneId: 'a', status: 'idle' }])
+    await settle()
+    pending[0]!.resolve('x')
+    await poller.stop()
+    poller.refresh('a')
+    await settle()
+    expect(calls).toEqual(['a'])
+  })
+
   it('stop resolves immediately when idle', async () => {
     const { poller } = setup()
     await poller.stop()

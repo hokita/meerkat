@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { AgentStatus } from '../shared/types.js'
 import {
   applyProgress,
+  applyReply,
   applyStatusEvent,
   boardFromSnapshot,
+  bumpEpoch,
   columnOf,
+  expireReplies,
   repoName,
   toView,
 } from './board.js'
@@ -18,6 +21,8 @@ function agent(paneId: string, status: AgentStatus, extra: Partial<HerdrAgent> =
     workspaceId: 'w1',
     name: null,
     status,
+    agent: 'claude',
+    terminalId: `t-${paneId}`,
     cwd: '/Users/u/ghq/github.com/hokita/pigeon',
     terminalTitle: null,
     ...extra,
@@ -90,6 +95,10 @@ describe('boardFromSnapshot', () => {
       since: 1000,
       sinceIsLowerBound: true,
       progress: null,
+      agent: 'claude',
+      terminalId: 't-p1',
+      statusEpoch: 0,
+      lastReply: null,
     })
   })
 
@@ -264,5 +273,127 @@ describe('applyProgress', () => {
     expect(evented.cards.get('p1')?.progress).toEqual(expected)
     const dropped = boardFromSnapshot(evented, snapshot([agent('p2', 'idle')]), 5000, HOME)
     expect([...dropped.cards.keys()]).toEqual(['p2'])
+  })
+})
+
+describe('statusEpoch', () => {
+  it('counts status changes from events and snapshots, not title changes', () => {
+    let state = boardFromSnapshot(null, snapshot([agent('p1', 'working')]), 1000, HOME)
+    expect(state.cards.get('p1')?.statusEpoch).toBe(0)
+    state = applyStatusEvent(state, { paneId: 'p1', status: 'working', title: 'T' }, 1100)
+    expect(state.cards.get('p1')?.statusEpoch).toBe(0)
+    state = applyStatusEvent(state, { paneId: 'p1', status: 'blocked' }, 1200)
+    expect(state.cards.get('p1')?.statusEpoch).toBe(1)
+    state = boardFromSnapshot(state, snapshot([agent('p1', 'blocked')]), 1300, HOME)
+    expect(state.cards.get('p1')?.statusEpoch).toBe(1)
+    state = boardFromSnapshot(state, snapshot([agent('p1', 'idle')]), 1400, HOME)
+    expect(state.cards.get('p1')?.statusEpoch).toBe(2)
+  })
+
+  it('gives new cards and re-added panes the next counter value', () => {
+    const first = boardFromSnapshot(null, snapshot([agent('p1', 'idle')]), 1000, HOME)
+    const added = boardFromSnapshot(
+      first,
+      snapshot([agent('p1', 'idle'), agent('p2', 'idle')]),
+      1200,
+      HOME
+    )
+    expect(first.cards.get('p1')?.statusEpoch).toBe(0)
+    expect(added.cards.get('p1')?.statusEpoch).toBe(0)
+    expect(added.cards.get('p2')?.statusEpoch).toBe(1)
+    const removed = boardFromSnapshot(added, snapshot([agent('p2', 'idle')]), 1300, HOME)
+    const back = boardFromSnapshot(
+      removed,
+      snapshot([agent('p1', 'idle'), agent('p2', 'idle')]),
+      1400,
+      HOME
+    )
+    expect(back.cards.get('p1')?.statusEpoch).toBe(2)
+  })
+
+  it('increases strictly across changes on different panes', () => {
+    let state = boardFromSnapshot(
+      null,
+      snapshot([agent('p1', 'working'), agent('p2', 'working')]),
+      1000,
+      HOME
+    )
+    const seen: number[] = [...state.cards.values()].map((card) => card.statusEpoch)
+    for (const [paneId, status] of [
+      ['p1', 'idle'],
+      ['p2', 'idle'],
+      ['p1', 'working'],
+    ] as const) {
+      state = applyStatusEvent(state, { paneId, status }, 2000)
+      seen.push(state.cards.get(paneId)?.statusEpoch ?? -1)
+    }
+    expect(seen).toEqual([0, 1, 2, 3, 4])
+  })
+
+  it('continues the counter when seeded from an earlier state after a gap', () => {
+    const before = applyStatusEvent(
+      boardFromSnapshot(null, snapshot([agent('p1', 'blocked')]), 1000, HOME),
+      { paneId: 'p1', status: 'working' },
+      1100
+    )
+    const seeded = { cards: new Map(), nextEpoch: before.nextEpoch }
+    const after = boardFromSnapshot(seeded, snapshot([agent('p1', 'blocked')]), 1200, HOME)
+    expect(before.cards.get('p1')?.statusEpoch).toBe(1)
+    expect(after.cards.get('p1')?.statusEpoch).toBe(2)
+  })
+})
+
+describe('replies', () => {
+  const blocked = boardFromSnapshot(null, snapshot([agent('p1', 'blocked')]), 1000, HOME)
+
+  it('applyReply records the summary, time and epoch', () => {
+    const next = applyReply(blocked, 'p1', 'Yes', 2000)
+    expect(next.cards.get('p1')?.lastReply).toEqual({ summary: 'Yes', at: 2000, epoch: 0 })
+    expect(applyReply(blocked, 'nope', 'Yes', 2000)).toBe(blocked)
+  })
+
+  it('keeps the reply through working and snapshots', () => {
+    let state = applyReply(blocked, 'p1', 'Yes', 2000)
+    state = applyStatusEvent(state, { paneId: 'p1', status: 'working' }, 2100)
+    expect(state.cards.get('p1')?.lastReply).not.toBeNull()
+    state = boardFromSnapshot(state, snapshot([agent('p1', 'working')]), 2200, HOME)
+    expect(state.cards.get('p1')?.lastReply).not.toBeNull()
+  })
+
+  it.each(['blocked', 'idle', 'done'] as const)('a later change into %s clears it', (status) => {
+    let state = applyReply(blocked, 'p1', 'Yes', 2000)
+    state = applyStatusEvent(state, { paneId: 'p1', status: 'working' }, 2100)
+    state = applyStatusEvent(state, { paneId: 'p1', status }, 2200)
+    expect(state.cards.get('p1')?.lastReply).toBeNull()
+  })
+
+  it('a snapshot showing a later reply-able status clears it', () => {
+    const replied = applyReply(blocked, 'p1', 'Yes', 2000)
+    const next = boardFromSnapshot(replied, snapshot([agent('p1', 'idle')]), 2200, HOME)
+    expect(next.cards.get('p1')?.lastReply).toBeNull()
+  })
+
+  it('expireReplies drops replies after 600000 ms', () => {
+    const replied = applyReply(blocked, 'p1', 'Yes', 2000)
+    expect(expireReplies(replied, 2000 + 599_999)).toBe(replied)
+    const expired = expireReplies(replied, 2000 + 600_000)
+    expect(expired.cards.get('p1')?.lastReply).toBeNull()
+  })
+
+  it('bumpEpoch gives the card the next counter value and keeps its reply', () => {
+    const replied = applyReply(blocked, 'p1', 'Yes', 2000)
+    const bumped = bumpEpoch(replied, 'p1')
+    expect(bumped.cards.get('p1')?.statusEpoch).toBe(replied.nextEpoch)
+    expect(bumped.nextEpoch).toBe(replied.nextEpoch + 1)
+    expect(bumped.cards.get('p1')?.lastReply).toEqual(replied.cards.get('p1')?.lastReply)
+    expect(bumped.cards.get('p1')?.since).toBe(replied.cards.get('p1')?.since)
+    expect(bumpEpoch(replied, 'nope')).toBe(replied)
+  })
+
+  it('a snapshot with the same status after a bump keeps the reply', () => {
+    const bumped = bumpEpoch(applyReply(blocked, 'p1', 'Yes', 2000), 'p1')
+    const next = boardFromSnapshot(bumped, snapshot([agent('p1', 'blocked')]), 2200, HOME)
+    expect(next.cards.get('p1')?.lastReply).not.toBeNull()
+    expect(next.cards.get('p1')?.statusEpoch).toBe(bumped.cards.get('p1')?.statusEpoch)
   })
 })

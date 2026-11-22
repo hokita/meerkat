@@ -19,6 +19,8 @@ export interface FakeHerdr {
   setRead(paneId: string, text: string | null): void
   setSnapshotDelay(ms: number): void
   setSubscribeError(error: { code: string; message: string } | null): void
+  setReplyError(error: { code: string; message: string } | null): void
+  onInput(handler: ((request: ReceivedRequest) => void) | null): void
   pushStatus(paneId: string, status: string, workspaceId?: string): void
   pushRaw(line: string): void
   stop(): Promise<void>
@@ -151,6 +153,8 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
   let snapshot = options.snapshot
   let snapshotDelayMs = 0
   let subscribeError: { code: string; message: string } | null = null
+  let replyError: { code: string; message: string } | null = null
+  let inputHandler: ((request: ReceivedRequest) => void) | null = null
   const reads = new Map<string, string>(Object.entries(options.reads ?? {}))
   const connections = new Set<net.Socket>()
   const subscribers = new Set<net.Socket>()
@@ -174,6 +178,12 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
     },
     setSubscribeError(error) {
       subscribeError = error
+    },
+    setReplyError(error) {
+      replyError = error
+    },
+    onInput(handler) {
+      inputHandler = handler
     },
     setRead(paneId, text) {
       if (text === null) reads.delete(paneId)
@@ -238,6 +248,25 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
         truncated: false,
       }
       socket.end(`${JSON.stringify({ id, result: { type: 'pane_read', read } })}\n`)
+    } else if (
+      method === 'agent.prompt' ||
+      method === 'agent.send_keys' ||
+      method === 'pane.send_text'
+    ) {
+      if (replyError !== null) {
+        socket.end(`${JSON.stringify({ id, error: replyError })}\n`)
+        return
+      }
+      inputHandler?.({ method, params })
+      const target = isObject(params) ? (params['target'] ?? params['pane_id']) : undefined
+      const result =
+        method === 'agent.prompt'
+          ? {
+              type: 'agent_prompted',
+              agent: { pane_id: target, agent_status: 'working', terminal_id: 'term-fake' },
+            }
+          : { type: 'ok' }
+      socket.end(`${JSON.stringify({ id, result })}\n`)
     } else if (method === 'events.subscribe' && subscribeError !== null) {
       socket.end(`${JSON.stringify({ id, error: subscribeError })}\n`)
     } else if (method === 'events.subscribe') {

@@ -1,37 +1,61 @@
 import { describe, expect, it } from 'vitest'
-import { ALLOWED_METHODS, MethodNotAllowedError, assertAllowed } from './allowlist.js'
+import { HERDR_METHODS } from '../../../test-support/herdr-methods.js'
+import {
+  MethodNotAllowedError,
+  READ_METHODS,
+  REPLY_METHODS,
+  assertReadAllowed,
+  assertReplyAllowed,
+} from './allowlist.js'
 
-describe('assertAllowed', () => {
-  it.each([
-    'session.snapshot',
-    'events.subscribe',
-    'events.wait',
-    'agent.list',
-    'agent.get',
-    'agent.read',
-  ])('allows %s', (m) => expect(() => assertAllowed(m)).not.toThrow())
+const READ = [
+  'session.snapshot',
+  'events.subscribe',
+  'events.wait',
+  'agent.list',
+  'agent.get',
+  'agent.read',
+]
+const REPLY = ['agent.prompt', 'agent.send_keys', 'pane.send_text']
+
+function passes(assert: (method: string) => void, method: string): boolean {
+  try {
+    assert(method)
+    return true
+  } catch (error) {
+    if (error instanceof MethodNotAllowedError) return false
+    throw error
+  }
+}
+
+describe('allow-lists', () => {
+  it('knows the schema methods', () => expect(HERDR_METHODS.length).toBe(102))
+
+  it('has six read and three reply methods', () => {
+    expect(READ_METHODS.size).toBe(6)
+    expect(REPLY_METHODS.size).toBe(3)
+  })
+
+  it.each([...HERDR_METHODS])('routes %s to at most one path', (method) => {
+    const read = passes(assertReadAllowed, method)
+    const reply = passes(assertReplyAllowed, method)
+    expect(read).toBe(READ.includes(method))
+    expect(reply).toBe(REPLY.includes(method))
+    expect(read && reply).toBe(false)
+  })
 
   it.each([
-    'agent.prompt',
-    'agent.start',
-    'agent.send_keys',
-    'agent.focus',
-    'agent.rename',
+    'server.stop',
     'pane.close',
-    'pane.split',
-    'pane.focus',
-    'pane.send_text',
+    'agent.start',
+    'pane.run',
     'pane.send_keys',
     'pane.send_input',
-    'pane.read',
-    'workspace.close',
-    'tab.close',
-    'server.stop',
-    'notification.show',
-    'ping',
+    'agent.focus',
     '',
-    'AGENT.READ',
-  ])('refuses %s', (m) => expect(() => assertAllowed(m)).toThrow(MethodNotAllowedError))
-
-  it('has exactly six methods', () => expect(ALLOWED_METHODS.size).toBe(6))
+    'AGENT.PROMPT',
+  ])('refuses %s on both paths', (method) => {
+    expect(() => assertReadAllowed(method)).toThrow(MethodNotAllowedError)
+    expect(() => assertReplyAllowed(method)).toThrow(MethodNotAllowedError)
+  })
 })

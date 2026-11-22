@@ -78,6 +78,8 @@ describe('parseSnapshotResponse', () => {
         workspaceId: 'w1H',
         name: 'meerkat-design',
         status: 'working',
+        agent: 'claude',
+        terminalId: 't',
         cwd: '/Users/hokita/.herdr/worktrees/meerkat/feat-initial-app',
         terminalTitle: 'Meerkat design doc and implementation pl...',
       },

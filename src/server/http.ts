@@ -1,15 +1,23 @@
 import { readFile, stat } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
+import { checkReplyRequest } from './guard.js'
 import type { HerdrClient } from './herdr/client.js'
-import { parseReadResponse } from './herdr/protocol.js'
-import { sanitizeOutput } from './output.js'
+import type { ReplySender } from './herdr/reply-sender.js'
+import { decodeSegment, paneIdFromSegment } from './pane-id.js'
+import { readPrompt } from './read-prompt.js'
+import { createReplyMemory, serveReply, type ReplyDeps } from './reply.js'
 import type { Supervisor, SupervisorState } from './supervisor.js'
 
 export interface HttpServerOptions {
-  supervisor: Pick<Supervisor, 'current' | 'onChange'>
+  supervisor: Pick<
+    Supervisor,
+    'current' | 'onChange' | 'card' | 'recordReply' | 'markSent' | 'refreshProgress'
+  >
   client: HerdrClient
+  sender: ReplySender
   port: number
+  token: string
   staticDir: string
   heartbeatMs?: number
 }
@@ -24,7 +32,9 @@ export class PortInUseError extends Error {
 }
 
 const DEFAULT_HEARTBEAT_MS = 15000
-const PANE_ID = /^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/
+const BASE64URL = /^[A-Za-z0-9_-]+$/
+const TOKEN_META = /<meta name="meerkat-token" content="[^"]*"/
+const REPLY_ROUTE = /^\/api\/sessions\/([^/]+)\/reply$/
 const OUTPUT_ROUTE = /^\/api\/sessions\/([^/]+)\/output$/
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -50,6 +60,21 @@ function baseHeaders(contentType: string, cacheControl = 'no-store'): http.Outgo
   }
 }
 
+function htmlHeaders(): http.OutgoingHttpHeaders {
+  return {
+    ...baseHeaders(CONTENT_TYPES['.html'] ?? 'text/html'),
+    'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "frame-ancestors 'none'",
+  }
+}
+
+function withToken(html: Buffer, token: string): Buffer {
+  if (!BASE64URL.test(token)) throw new Error('token is not base64url')
+  return Buffer.from(
+    html.toString('utf8').replace(TOKEN_META, `<meta name="meerkat-token" content="${token}"`)
+  )
+}
+
 function sendText(
   res: http.ServerResponse,
   status: number,
@@ -63,14 +88,6 @@ function sendText(
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, baseHeaders('application/json; charset=utf-8'))
   res.end(JSON.stringify(body))
-}
-
-function decodeSegment(value: string): string | null {
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return null
-  }
 }
 
 function serveEvents(
@@ -106,8 +123,8 @@ async function serveOutput(
   encodedId: string,
   opts: HttpServerOptions
 ): Promise<void> {
-  const target = decodeSegment(encodedId)
-  if (target === null || !PANE_ID.test(target)) {
+  const target = paneIdFromSegment(encodedId)
+  if (target === null) {
     sendJson(res, 400, { error: 'invalid_pane_id' })
     return
   }
@@ -116,20 +133,16 @@ async function serveOutput(
     return
   }
   try {
-    const line = await opts.client.request('agent.read', {
-      target,
-      source: 'recent_unwrapped',
-      lines: 40,
-      format: 'text',
-      strip_ansi: true,
-    })
-    const read = parseReadResponse(line)
-    if (read.kind === 'gone') {
+    const result = await readPrompt(opts, target)
+    if (result === 'gone') {
       sendJson(res, 404, { error: 'session_closed' })
       return
     }
-    const sanitized = sanitizeOutput(read.text)
-    sendJson(res, 200, { text: sanitized.text, truncated: read.truncated || sanitized.clipped })
+    if (result === 'changed') {
+      sendJson(res, 409, { error: 'session_changed' })
+      return
+    }
+    sendJson(res, 200, result)
   } catch {
     sendJson(res, 502, { error: 'herdr_error' })
   }
@@ -152,7 +165,8 @@ function looksLikeFile(pathname: string): boolean {
 async function serveStatic(
   res: http.ServerResponse,
   pathname: string,
-  staticDir: string
+  staticDir: string,
+  token: string
 ): Promise<void> {
   const decoded = decodeSegment(pathname)
   if (decoded === null) {
@@ -164,7 +178,13 @@ async function serveStatic(
   const inside = resolved === root || resolved.startsWith(root + path.sep)
   const body = inside && decoded !== '/' ? await readFileIfPresent(resolved) : null
   if (body !== null) {
-    const type = CONTENT_TYPES[path.extname(resolved).toLowerCase()] ?? 'application/octet-stream'
+    const extension = path.extname(resolved).toLowerCase()
+    if (extension === '.html') {
+      res.writeHead(200, htmlHeaders())
+      res.end(resolved === path.join(root, 'index.html') ? withToken(body, token) : body)
+      return
+    }
+    const type = CONTENT_TYPES[extension] ?? 'application/octet-stream'
     res.writeHead(200, baseHeaders(type))
     res.end(body)
     return
@@ -178,23 +198,56 @@ async function serveStatic(
     sendText(res, 404, 'Not Found')
     return
   }
-  res.writeHead(200, baseHeaders(CONTENT_TYPES['.html'] ?? 'text/html'))
-  res.end(index)
+  res.writeHead(200, htmlHeaders())
+  res.end(withToken(index, token))
+}
+
+const GUARD_REFUSALS = {
+  forbidden: { status: 403, error: 'forbidden' },
+  unsupported_media: { status: 415, error: 'unsupported_media' },
+} as const
+
+async function postReply(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  segment: string,
+  opts: HttpServerOptions,
+  deps: ReplyDeps
+): Promise<void> {
+  const guard = checkReplyRequest(req, opts.token, opts.port)
+  if (guard !== 'ok') {
+    const refusal = GUARD_REFUSALS[guard]
+    sendJson(res, refusal.status, { error: refusal.error })
+    return
+  }
+  const result = await serveReply(deps, req, segment)
+  sendJson(res, result.status, result.body)
 }
 
 export function createHttpServer(opts: HttpServerOptions): http.Server {
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS
+  const replyDeps: ReplyDeps = {
+    supervisor: opts.supervisor,
+    read: (paneId) => readPrompt(opts, paneId),
+    sender: opts.sender,
+    memory: createReplyMemory(),
+  }
 
   async function route(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     if (!isAllowedHost(req.headers.host, opts.port)) {
       sendText(res, 421, 'Misdirected Request')
       return
     }
-    if (req.method !== 'GET') {
-      sendText(res, 405, 'Method Not Allowed', { Allow: 'GET' })
+    const pathname = (req.url ?? '/').split('?')[0] ?? '/'
+    const reply = REPLY_ROUTE.exec(pathname)
+    if (reply !== null && req.method === 'POST') {
+      await postReply(req, res, reply[1] ?? '', opts, replyDeps)
       return
     }
-    const pathname = (req.url ?? '/').split('?')[0] ?? '/'
+    if (reply !== null || req.method !== 'GET') {
+      sendText(res, 405, 'Method Not Allowed', { Allow: reply === null ? 'GET' : 'POST' })
+      return
+    }
     if (pathname === '/api/events') {
       serveEvents(res, opts.supervisor, heartbeatMs)
       return
@@ -208,7 +261,7 @@ export function createHttpServer(opts: HttpServerOptions): http.Server {
       sendJson(res, 404, { error: 'not_found' })
       return
     }
-    await serveStatic(res, pathname, opts.staticDir)
+    await serveStatic(res, pathname, opts.staticDir, opts.token)
   }
 
   return http.createServer({ requireHostHeader: false }, (req, res) => {

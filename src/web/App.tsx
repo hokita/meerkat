@@ -31,6 +31,7 @@ export function App() {
           paneId={openPaneId}
           card={findCard(board, openPaneId)}
           onClose={() => setOpenPaneId(null)}
+          herdrConnected={herdr === 'connected' && stream !== 'lost'}
         />
       )}
     </>

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Card } from '../shared/types'
+import type { Card, Prompt, ReplyRequest } from '../shared/types'
+import { ReplyPanel } from './ReplyPanel'
+import { parsePrompt, type ReplyResult } from './replyApi'
 
 type OutputStatus = 'ok' | 'closed' | 'unreachable' | 'error'
 
@@ -8,13 +10,20 @@ interface OutputState {
   status: OutputStatus
   text: string | null
   truncated: boolean
+  prompt: Prompt
+  generation: number
+  epoch: number
 }
+
+const NO_PROMPT: Prompt = { kind: 'none' }
 
 interface OutputDrawerProps {
   paneId: string
   card: Card | null
   onClose: () => void
   fetchOutput?: (paneId: string) => Promise<Response>
+  herdrConnected?: boolean
+  send?: (paneId: string, request: ReplyRequest) => Promise<ReplyResult>
 }
 
 function defaultFetchOutput(paneId: string): Promise<Response> {
@@ -30,16 +39,35 @@ function statusFor(response: Response): OutputStatus {
 
 async function loadOutput(
   fetchOutput: (paneId: string) => Promise<Response>,
-  paneId: string
+  paneId: string,
+  generation: number,
+  epoch: number
 ): Promise<OutputState> {
+  const failed = (status: OutputStatus): OutputState => ({
+    paneId,
+    status,
+    text: null,
+    truncated: false,
+    prompt: NO_PROMPT,
+    generation,
+    epoch,
+  })
   try {
     const response = await fetchOutput(paneId)
     const status = statusFor(response)
-    if (status !== 'ok') return { paneId, status, text: null, truncated: false }
-    const body = (await response.json()) as { text: string; truncated: boolean }
-    return { paneId, status, text: body.text, truncated: body.truncated }
+    if (status !== 'ok') return failed(status)
+    const body = (await response.json()) as { text: string; truncated: boolean; prompt?: unknown }
+    return {
+      paneId,
+      status,
+      text: body.text,
+      truncated: body.truncated,
+      prompt: parsePrompt(body.prompt) ?? NO_PROMPT,
+      generation,
+      epoch,
+    }
   } catch {
-    return { paneId, status: 'error', text: null, truncated: false }
+    return failed('error')
   }
 }
 
@@ -56,6 +84,8 @@ export function OutputDrawer({
   card,
   onClose,
   fetchOutput = defaultFetchOutput,
+  herdrConnected = false,
+  send,
 }: OutputDrawerProps) {
   const [state, setState] = useState<OutputState | null>(null)
   const [reloads, setReloads] = useState(0)
@@ -64,6 +94,7 @@ export function OutputDrawer({
   const closeRef = useRef<HTMLButtonElement>(null)
 
   if (card !== null && card !== lastCard) setLastCard(card)
+  const epoch = (card ?? lastCard)?.statusEpoch ?? 0
 
   useEffect(() => {
     closeRef.current?.focus()
@@ -79,25 +110,53 @@ export function OutputDrawer({
 
   useEffect(() => {
     let cancelled = false
-    void loadOutput(fetchOutput, paneId).then((result) => {
+    void loadOutput(fetchOutput, paneId, reloads, epoch).then((result) => {
       if (!cancelled) setState((previous) => merge(previous, result))
     })
     return () => {
       cancelled = true
     }
-  }, [paneId, fetchOutput, reloads])
+  }, [paneId, fetchOutput, reloads, epoch])
 
   const current = state !== null && state.paneId === paneId ? state : null
   const text = current?.text ?? null
+  const outputFirst = current?.prompt.kind === 'unrecognized'
 
   useEffect(() => {
     const element = scrollRef.current
     if (element !== null) element.scrollTop = element.scrollHeight
-  }, [text])
+  }, [text, outputFirst])
 
   const name = lastCard?.name ?? '(unnamed)'
   const message = messageFor(card, current)
   const refreshDisabled = card === null || current?.status === 'closed'
+  const loading = current === null || current.generation !== reloads
+  const stale = current === null || current.epoch !== epoch
+  const refresh = () => setReloads((count) => count + 1)
+
+  const panel = card !== null && current !== null && (
+    <ReplyPanel
+      paneId={paneId}
+      name={name}
+      prompt={current.prompt}
+      status={card.status}
+      disabled={!herdrConnected || loading || stale}
+      onSent={refresh}
+      onPromptChanged={(prompt) => {
+        setState((previous) => (previous === null ? previous : { ...previous, prompt }))
+        refresh()
+      }}
+      send={send}
+    />
+  )
+  const output = (
+    <>
+      {current?.truncated === true && <p className="drawer-note">Showing the last 40 lines</p>}
+      <div className="drawer-scroll" ref={scrollRef}>
+        {text !== null && <pre className="drawer-output">{text}</pre>}
+      </div>
+    </>
+  )
 
   return (
     <div className="drawer-backdrop">
@@ -111,7 +170,7 @@ export function OutputDrawer({
             type="button"
             className="drawer-button"
             disabled={refreshDisabled}
-            onClick={() => setReloads((count) => count + 1)}
+            onClick={refresh}
           >
             Refresh
           </button>
@@ -120,10 +179,9 @@ export function OutputDrawer({
           </button>
         </header>
         {message !== null && <p className="drawer-message">{message}</p>}
-        {current?.truncated === true && <p className="drawer-note">Showing the last 40 lines</p>}
-        <div className="drawer-scroll" ref={scrollRef}>
-          {text !== null && <pre className="drawer-output">{text}</pre>}
-        </div>
+        {outputFirst && output}
+        {panel}
+        {!outputFirst && output}
       </aside>
     </div>
   )

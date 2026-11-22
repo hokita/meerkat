@@ -19,6 +19,10 @@ function card(overrides: Partial<Card> = {}): Card {
     since: now - 60_000,
     sinceIsLowerBound: false,
     progress: null,
+    agent: 'claude',
+    terminalId: 't1',
+    statusEpoch: 0,
+    lastReply: null,
     ...overrides,
   }
 }
@@ -116,6 +120,53 @@ describe('Board', () => {
     const { board, rerender } = renderWorking(c)
     rerender(<Board board={board} now={now + 60_000} stale={false} onOpen={() => {}} />)
     expect(screen.getByText('updated 1m ago')).toBeInTheDocument()
+  })
+
+  it.each(['blocked', 'idle', 'done'] as const)('shows the Reply label on a %s card', (status) => {
+    const board = { ...empty, attention: [card({ status })] }
+    render(<Board board={board} now={now} stale={false} onOpen={() => {}} />)
+    expect(screen.getByText('Reply')).toHaveClass('card-reply')
+  })
+
+  it.each(['working', 'unknown'] as const)('hides the Reply label on a %s card', (status) => {
+    const board = { ...empty, working: [card({ status })] }
+    render(<Board board={board} now={now} stale={false} onOpen={() => {}} />)
+    expect(screen.queryByText('Reply')).toBeNull()
+  })
+
+  it('shows the last reply with its age', () => {
+    const board = {
+      ...empty,
+      attention: [
+        card({
+          status: 'blocked',
+          lastReply: { summary: 'Answered "Yes"', at: now - 8_000, epoch: 0 },
+        }),
+      ],
+    }
+    render(<Board board={board} now={now} stale={false} onOpen={() => {}} />)
+    expect(screen.getByText('Answered "Yes" from Meerkat · 8s ago')).toHaveClass('card-last-reply')
+  })
+
+  it('renders the last reply as text, not HTML', () => {
+    const board = {
+      ...empty,
+      attention: [
+        card({
+          status: 'blocked',
+          lastReply: { summary: 'Typed "<b>x</b>"', at: now, epoch: 0 },
+        }),
+      ],
+    }
+    const { container } = render(<Board board={board} now={now} stale={false} onOpen={() => {}} />)
+    expect(screen.getByText('Typed "<b>x</b>" from Meerkat · 0s ago')).toBeInTheDocument()
+    expect(container.querySelector('.card b')).toBeNull()
+  })
+
+  it('shows no last reply line without one', () => {
+    const board = { ...empty, attention: [card({ status: 'blocked' })] }
+    const { container } = render(<Board board={board} now={now} stale={false} onOpen={() => {}} />)
+    expect(container.querySelector('.card-last-reply')).toBeNull()
   })
 
   it('calls onOpen on click and on Enter', async () => {

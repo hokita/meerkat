@@ -5,6 +5,8 @@ export interface HerdrAgent {
   workspaceId: string
   name: string | null
   status: AgentStatus
+  agent: string | null
+  terminalId: string | null
   cwd: string | null
   terminalTitle: string | null
 }
@@ -124,6 +126,8 @@ function parseAgent(agent: JsonObject): HerdrAgent | null {
     workspaceId,
     name: asString(agent['name']),
     status: parseStatus(agent['agent_status']),
+    agent: asString(agent['agent']),
+    terminalId: asString(agent['terminal_id']),
     cwd: asString(agent['cwd']),
     terminalTitle: asString(agent['terminal_title_stripped']) ?? asString(agent['terminal_title']),
   }
@@ -138,6 +142,10 @@ function parseWorkspace(workspace: JsonObject): HerdrWorkspace | null {
     label: asString(workspace['label']),
     repoName: isObject(worktree) ? asString(worktree['repo_name']) : null,
   }
+}
+
+export function parseReplyResult(line: string, type: string): void {
+  resultOf(line, type)
 }
 
 export function parseSnapshotResponse(line: string): HerdrSnapshot {

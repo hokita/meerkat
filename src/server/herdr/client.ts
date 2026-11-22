@@ -1,5 +1,5 @@
 import net from 'node:net'
-import { assertAllowed } from './allowlist.js'
+import { assertReadAllowed } from './allowlist.js'
 import { LineSplitter } from './lines.js'
 
 export class HerdrTimeoutError extends Error {
@@ -26,6 +26,42 @@ export interface HerdrClientOptions {
 
 const DEFAULT_TIMEOUT_MS = 5000
 
+export function requestLine(
+  socketPath: string,
+  payload: string,
+  timeoutMs: number
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const socket = net.createConnection({ path: socketPath })
+    const splitter = new LineSplitter()
+    let settled = false
+    const finish = (outcome: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket.destroy()
+      outcome()
+    }
+    const timer = setTimeout(
+      () => finish(() => reject(new HerdrTimeoutError(timeoutMs))),
+      timeoutMs
+    )
+    socket.on('connect', () => socket.write(payload))
+    socket.on('data', (chunk) => {
+      try {
+        const [line] = splitter.push(chunk)
+        if (line !== undefined) finish(() => resolve(line))
+      } catch (error) {
+        finish(() => reject(error))
+      }
+    })
+    socket.on('error', (error) => finish(() => reject(error)))
+    socket.on('close', () =>
+      finish(() => reject(new Error('Herdr closed the connection without answering')))
+    )
+  })
+}
+
 export function createHerdrClient(opts: HerdrClientOptions): HerdrClient {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   let counter = 0
@@ -37,41 +73,12 @@ export function createHerdrClient(opts: HerdrClientOptions): HerdrClient {
 
   return {
     async request(method, params) {
-      assertAllowed(method)
-      const payload = nextRequest(method, params)
-      return new Promise<string>((resolve, reject) => {
-        const socket = net.createConnection({ path: opts.socketPath })
-        const splitter = new LineSplitter()
-        let settled = false
-        const finish = (outcome: () => void): void => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          socket.destroy()
-          outcome()
-        }
-        const timer = setTimeout(
-          () => finish(() => reject(new HerdrTimeoutError(timeoutMs))),
-          timeoutMs
-        )
-        socket.on('connect', () => socket.write(payload))
-        socket.on('data', (chunk) => {
-          try {
-            const [line] = splitter.push(chunk)
-            if (line !== undefined) finish(() => resolve(line))
-          } catch (error) {
-            finish(() => reject(error))
-          }
-        })
-        socket.on('error', (error) => finish(() => reject(error)))
-        socket.on('close', () =>
-          finish(() => reject(new Error('Herdr closed the connection without answering')))
-        )
-      })
+      assertReadAllowed(method)
+      return requestLine(opts.socketPath, nextRequest(method, params), timeoutMs)
     },
 
     subscribe(params, onLine) {
-      assertAllowed('events.subscribe')
+      assertReadAllowed('events.subscribe')
       const payload = nextRequest('events.subscribe', params)
       const socket = net.createConnection({ path: opts.socketPath })
       const splitter = new LineSplitter()

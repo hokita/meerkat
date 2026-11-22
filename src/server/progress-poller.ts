@@ -7,6 +7,7 @@ export interface PolledPane {
 
 export interface ProgressPoller {
   sync(panes: readonly PolledPane[]): void
+  refresh(paneId: string): void
   stop(): Promise<void>
 }
 
@@ -94,6 +95,11 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
           followUps.delete(paneId)
         }
       }
+      drain()
+    },
+    refresh(paneId) {
+      if (stopped || !known.has(paneId)) return
+      queue.add(paneId)
       drain()
     },
     stop() {

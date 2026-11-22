@@ -37,6 +37,10 @@ function isChrome(line: string): boolean {
   )
 }
 
+export function isVolatileLine(line: string): boolean {
+  return line.trim().startsWith('⏵') || SPINNER_LINE.test(line)
+}
+
 function collapse(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }

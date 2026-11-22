@@ -1,0 +1,60 @@
+
+
+⏺ I created notes.txt in the working directory with the Write tool. It contains the single word hi.
+
+✻ Worked for 8s · done 21:48
+
+❯ Use the AskUserQuestion tool to ask me exactly one single-select question: header "Color", question "Which color should the note use?", options "Red" (description "A warm color") and
+  "Blue" (description "A cool color"). Do nothing else.
+
+⏺ User answered Claude's questions:
+  ⎿  · Which color should the note use? → Blue
+
+⏺ You picked Blue for the note's color. As you asked, I haven't changed notes.txt or anything else.
+
+✻ Worked for 5s · done 21:49
+
+❯ Use the AskUserQuestion tool again to ask me exactly one single-select question: header "Size", question "Which size should the note use?", options "Small" (description "Fits one
+  line") and "Large" (description "Fills the page"). Do nothing else.
+
+⏺ User answered Claude's questions:
+  ⎿  · Which size should the note use? → Medium please
+
+⏺ You answered "Medium please" to the size question, which wasn't one of the two options (Small or Large). As you asked, I haven't changed anything.
+
+✻ Cogitated for 9s · done 21:50
+
+❯ Without using any tools, reply with a numbered list of three fruit names, then end with the question: Which one do you want?
+
+⏺ 1. Apple
+  2. Banana
+  3. Mango
+
+  Which one do you want?
+
+✻ Baked for 3s · done 21:51
+
+❯ Use the AskUserQuestion tool to ask me exactly one multi-select question (multiSelect true): header "Toppings", question "Which toppings should the note list?", options "Cheese"
+  (description "Soft and salty") and "Olives" (description "Small and briny"). Do nothing else.
+
+⏺ User declined to answer questions
+  ⎿  · Which toppings should the note list? (Cheese / Olives)
+
+✻ Churned for 4s · done 21:51
+
+❯ Use the AskUserQuestion tool to ask me two single-select questions at once in one call: first header "Shape", question "Which shape should the note use?", options "Square" and
+  "Circle"; second header "Font", question "Which font should the note use?", options "Serif" and "Sans". Do nothing else.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Shape  ☐ Font  ✔ Submit  →
+
+Which shape should the note use?
+
+❯ 1. Square
+     Square shape
+  2. Circle
+     Circle shape
+  3. Type something.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

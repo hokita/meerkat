@@ -1,8 +1,11 @@
-import type { AgentStatus, BoardView, HerdrConnection } from '../shared/types.js'
+import type { AgentStatus, BoardView, Card, HerdrConnection } from '../shared/types.js'
 import {
   applyProgress,
+  applyReply,
   applyStatusEvent,
   boardFromSnapshot,
+  bumpEpoch,
+  expireReplies,
   toView,
   type BoardState,
 } from './board.js'
@@ -25,6 +28,10 @@ export interface Supervisor {
   start(): void
   stop(): Promise<void>
   current(): SupervisorState
+  card(paneId: string): Card | undefined
+  recordReply(paneId: string, summary: string): void
+  markSent(paneId: string): void
+  refreshProgress(paneId: string): void
   onChange(listener: (state: SupervisorState) => void): () => void
 }
 
@@ -73,7 +80,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   const backoffMaxMs = opts.backoffMaxMs ?? 5000
   const log = opts.log ?? ((message: string) => console.error(message))
 
-  let board: BoardState = { cards: new Map() }
+  let board: BoardState = { cards: new Map(), nextEpoch: 0 }
   let herdr: HerdrConnection = 'connecting'
   let state: SupervisorState = { herdr, board: toView(board) }
   let serialized = JSON.stringify(state)
@@ -209,12 +216,18 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
       statusesDuringSnapshot = []
     }
     if (stopped) return snapshot
-    board = boardFromSnapshot(observationGap ? null : board, snapshot, now(), home)
+    board = boardFromSnapshot(
+      observationGap ? { cards: new Map(), nextEpoch: board.nextEpoch } : board,
+      snapshot,
+      now(),
+      home
+    )
     observationGap = false
     for (const status of received) board = applyStatusEvent(board, status, status.receivedAt)
     herdr = 'connected'
     outageLogged = false
     armReconcile()
+    board = expireReplies(board, now())
     publish()
     if (eventsDuringSnapshot && !snapshotDue) scheduleSnapshot()
     return snapshot
@@ -328,6 +341,22 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
     },
     current() {
       return state
+    },
+    card(paneId) {
+      return board.cards.get(paneId)
+    },
+    recordReply(paneId, summary) {
+      if (!board.cards.has(paneId)) return
+      board = applyReply(board, paneId, summary, now())
+      publish()
+    },
+    markSent(paneId) {
+      if (!board.cards.has(paneId)) return
+      board = bumpEpoch(board, paneId)
+      publish()
+    },
+    refreshProgress(paneId) {
+      poller.refresh(paneId)
     },
     onChange(listener) {
       listeners.add(listener)

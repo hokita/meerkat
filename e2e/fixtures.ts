@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect } from '@playwright/test'
-import { ALLOWED_METHODS } from '../src/server/herdr/allowlist.js'
+import { READ_METHODS, REPLY_METHODS } from '../src/server/herdr/allowlist.js'
 import { fakeSnapshot, startFakeHerdr, type FakeHerdr } from '../test-support/fake-herdr.js'
 
 export interface Meerkat {
@@ -80,7 +80,7 @@ export const test = base.extend<Fixtures & Options>({
       await use({ fake, baseURL: `http://localhost:${port}` })
       const rejected = fake.received
         .map((entry) => entry.method)
-        .filter((m) => !ALLOWED_METHODS.has(m))
+        .filter((m) => !READ_METHODS.has(m) && !REPLY_METHODS.has(m))
       expect(rejected).toEqual([])
     } finally {
       await stopChild(child)
