@@ -1,7 +1,7 @@
 # Meerkat
 
 A small local web app that answers one question at a glance: what needs my attention? It shows your
-[Herdr](https://herdr.dev) agent sessions in three live columns (Needs attention, Working, Idle) and
+[Herdr](https://herdr.dev) agent sessions in four live columns (Waiting for you, Done, Working, Idle) and
 opens the last lines of a session's output on demand. It can also reply to a session.
 
 ## Run

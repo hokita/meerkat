@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures.js'
+import { expect, test, type Meerkat } from './fixtures.js'
 import { fakeAgent, fakeSnapshot } from '../test-support/fake-herdr.js'
 
 function column(page: import('@playwright/test').Page, title: string) {
@@ -15,13 +15,28 @@ const agents = {
 
 const initialSnapshot = fakeSnapshot({ agents: Object.values(agents) })
 
+function changeStatus(meerkat: Meerkat, paneId: string, status: string): void {
+  const moved = Object.values(agents).map((agent) =>
+    agent.pane_id === paneId ? { ...agent, agent_status: status } : agent
+  )
+  meerkat.fake.setSnapshot(fakeSnapshot({ agents: moved }))
+  meerkat.fake.pushStatus(paneId, status)
+}
+
 test.use({ initialSnapshot })
 
 test('shows sessions in columns', async ({ page, meerkat }) => {
   await page.goto(meerkat.baseURL)
-  const attention = column(page, 'Needs attention')
-  await expect(attention.getByRole('button', { name: /done-one/ })).toBeVisible()
-  await expect(attention.getByRole('button', { name: /blocked-one/ })).toBeVisible()
+  await expect(page.locator('section.column h2 > span:first-child')).toHaveText([
+    'Waiting for you',
+    'Done',
+    'Working',
+    'Idle',
+  ])
+  await expect(
+    column(page, 'Waiting for you').getByRole('button', { name: /blocked-one/ })
+  ).toBeVisible()
+  await expect(column(page, 'Done').getByRole('button', { name: /done-one/ })).toBeVisible()
   await expect(column(page, 'Working').getByRole('button', { name: /working-one/ })).toBeVisible()
   const idle = column(page, 'Idle')
   await expect(idle.getByRole('button', { name: /idle-one/ })).toBeVisible()
@@ -31,10 +46,57 @@ test('shows sessions in columns', async ({ page, meerkat }) => {
 test('moves a card when status changes', async ({ page, meerkat }) => {
   await page.goto(meerkat.baseURL)
   await expect(column(page, 'Working').getByRole('button', { name: /working-one/ })).toBeVisible()
-  meerkat.fake.pushStatus(agents.working.pane_id, 'done')
+  changeStatus(meerkat, agents.working.pane_id, 'blocked')
   await expect(
-    column(page, 'Needs attention').getByRole('button', { name: /working-one/ })
+    column(page, 'Waiting for you').getByRole('button', { name: /working-one/ })
   ).toBeVisible({ timeout: 2000 })
+  changeStatus(meerkat, agents.working.pane_id, 'done')
+  await expect(column(page, 'Done').getByRole('button', { name: /working-one/ })).toBeVisible({
+    timeout: 2000,
+  })
+  await expect(
+    column(page, 'Waiting for you').getByRole('button', { name: /working-one/ })
+  ).toHaveCount(0)
+})
+
+test('lays out four, two and one columns by width', async ({ page, meerkat }) => {
+  await page.goto(meerkat.baseURL)
+  await expect(page.getByRole('region')).toHaveCount(4)
+  for (const [width, height, columns] of [
+    [1280, 800, 4],
+    [1024, 768, 2],
+    [390, 844, 1],
+  ] as const) {
+    await page.setViewportSize({ width, height })
+    const boxes = await Promise.all(
+      (await page.getByRole('region').all()).map((region) => region.boundingBox())
+    )
+    const lefts = new Set(boxes.map((box) => Math.round(box?.x ?? -1)))
+    expect(lefts.size, `columns at ${width}px`).toBe(columns)
+    const fits: unknown = await page.evaluate(
+      'document.documentElement.scrollWidth <= window.innerWidth'
+    )
+    expect(fits, `no horizontal scroll at ${width}px`).toBe(true)
+  }
+})
+
+test('drawer stays on a card that moves from Waiting for you to Done', async ({
+  page,
+  meerkat,
+}) => {
+  meerkat.fake.setRead(agents.blocked.pane_id, 'question')
+  await page.goto(meerkat.baseURL)
+  await column(page, 'Waiting for you')
+    .getByRole('button', { name: /blocked-one/ })
+    .click()
+  const dialog = page.getByRole('dialog', { name: 'Output for blocked-one' })
+  await expect(dialog.locator('pre')).toHaveText('question')
+  changeStatus(meerkat, agents.blocked.pane_id, 'done')
+  await expect(column(page, 'Done').getByRole('button', { name: /blocked-one/ })).toBeAttached({
+    timeout: 2000,
+  })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText('Session closed')).toHaveCount(0)
 })
 
 test('opens output', async ({ page, meerkat }) => {
@@ -120,10 +182,10 @@ test.describe('with progress reads', () => {
     await expect(working).toContainText(/updated ≥ \d+s ago/)
 
     meerkat.fake.setRead(agents.working.pane_id, '⏺ Docs written; all checks pass.')
-    meerkat.fake.pushStatus(agents.working.pane_id, 'done')
-    const attention = column(page, 'Needs attention').getByRole('button', { name: /working-one/ })
-    await expect(attention).toContainText('Docs written; all checks pass.')
-    await expect(attention).toContainText(/updated \d+s ago/)
+    changeStatus(meerkat, agents.working.pane_id, 'done')
+    const done = column(page, 'Done').getByRole('button', { name: /working-one/ })
+    await expect(done).toContainText('Docs written; all checks pass.')
+    await expect(done).toContainText(/updated \d+s ago/)
   })
 
   test('shows the newest sentence for a blocked session on a short pane', async ({
@@ -150,10 +212,8 @@ test('only read methods reach Herdr', async ({ page, meerkat }) => {
   await page.goto(meerkat.baseURL)
   await page.getByRole('button', { name: /working-one/ }).click()
   await expect(page.getByRole('dialog').locator('pre')).toHaveText('text')
-  meerkat.fake.pushStatus(agents.working.pane_id, 'done')
-  await expect(
-    column(page, 'Needs attention').getByRole('button', { name: /working-one/ })
-  ).toBeVisible()
+  changeStatus(meerkat, agents.working.pane_id, 'done')
+  await expect(column(page, 'Done').getByRole('button', { name: /working-one/ })).toBeVisible()
   await meerkat.fake.restart()
   await expect(page.getByRole('button', { name: /idle-one/ })).toBeVisible()
   expect(meerkat.fake.received.length).toBeGreaterThan(0)

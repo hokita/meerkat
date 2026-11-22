@@ -27,22 +27,30 @@ function card(overrides: Partial<Card> = {}): Card {
   }
 }
 
-const empty: BoardView = { attention: [], working: [], idle: [] }
+const empty: BoardView = { waiting: [], done: [], working: [], idle: [] }
 
 describe('Board', () => {
-  it('renders three regions with headings and count badges', () => {
+  it('renders four regions in order with count badges', () => {
     const board: BoardView = {
-      attention: [card({ paneId: 'a', status: 'done' }), card({ paneId: 'b', status: 'blocked' })],
+      waiting: [card({ paneId: 'a', status: 'blocked' }), card({ paneId: 'b', status: 'blocked' })],
+      done: [card({ paneId: 'c', status: 'done' })],
       working: [card()],
       idle: [],
     }
     render(<Board board={board} now={now} stale={false} onOpen={() => {}} />)
-    const attention = screen.getByRole('region', { name: 'Needs attention' })
-    expect(within(attention).getByText('2')).toBeInTheDocument()
-    expect(
-      within(screen.getByRole('region', { name: 'Working' })).getByText('1')
-    ).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: 'Idle' })).getByText('0')).toBeInTheDocument()
+    const regions = screen.getAllByRole('region')
+    expect(regions.map((region) => region.querySelector('h2 > span')?.textContent)).toEqual([
+      'Waiting for you',
+      'Done',
+      'Working',
+      'Idle',
+    ])
+    expect(regions.map((region) => region.querySelector('.badge')?.textContent)).toEqual([
+      '2',
+      '1',
+      '1',
+      '0',
+    ])
   })
 
   it('shows the card fields', () => {
@@ -122,8 +130,12 @@ describe('Board', () => {
     expect(screen.getByText('updated 1m ago')).toBeInTheDocument()
   })
 
-  it.each(['blocked', 'idle', 'done'] as const)('shows the Reply label on a %s card', (status) => {
-    const board = { ...empty, attention: [card({ status })] }
+  it.each([
+    ['blocked', 'waiting'],
+    ['done', 'done'],
+    ['idle', 'idle'],
+  ] as const)('shows the Reply label on a %s card', (status, column) => {
+    const board = { ...empty, [column]: [card({ status })] }
     render(<Board board={board} now={now} stale={false} onOpen={() => {}} />)
     expect(screen.getByText('Reply')).toHaveClass('card-reply')
   })
@@ -137,7 +149,7 @@ describe('Board', () => {
   it('shows the last reply with its age', () => {
     const board = {
       ...empty,
-      attention: [
+      waiting: [
         card({
           status: 'blocked',
           lastReply: { summary: 'Answered "Yes"', at: now - 8_000, epoch: 0 },
@@ -151,7 +163,7 @@ describe('Board', () => {
   it('renders the last reply as text, not HTML', () => {
     const board = {
       ...empty,
-      attention: [
+      waiting: [
         card({
           status: 'blocked',
           lastReply: { summary: 'Typed "<b>x</b>"', at: now, epoch: 0 },
@@ -164,7 +176,7 @@ describe('Board', () => {
   })
 
   it('shows no last reply line without one', () => {
-    const board = { ...empty, attention: [card({ status: 'blocked' })] }
+    const board = { ...empty, waiting: [card({ status: 'blocked' })] }
     const { container } = render(<Board board={board} now={now} stale={false} onOpen={() => {}} />)
     expect(container.querySelector('.card-last-reply')).toBeNull()
   })
@@ -185,7 +197,7 @@ describe('Board', () => {
 
   it('shows Nothing here in an empty column', () => {
     render(<Board board={empty} now={now} stale={false} onOpen={() => {}} />)
-    expect(screen.getAllByText('Nothing here')).toHaveLength(3)
+    expect(screen.getAllByText('Nothing here')).toHaveLength(4)
   })
 
   it('marks cards aria-disabled when stale', () => {
