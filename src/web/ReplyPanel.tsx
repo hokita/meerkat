@@ -140,7 +140,12 @@ export function ReplyPanel({
 
   function pressKey(key: ReplyKey) {
     const action: ReplyAction = { type: 'keys', keys: [key] }
-    if (key === 'esc') {
+    if (key === 'esc' && isDraftScreen(status)) {
+      confirm(
+        `Send "${KEY_LABELS[key]}" to ${name}? If this session is still running, Esc interrupts it; check the output above.`,
+        action
+      )
+    } else if (key === 'esc') {
       void submit(action)
     } else {
       confirm(

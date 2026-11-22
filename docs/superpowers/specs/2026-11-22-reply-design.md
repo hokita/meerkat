@@ -357,6 +357,10 @@ content types 415; the frame headers on `/`; the token differs between two serve
   because it could be a permission prompt Meerkat failed to read. `Esc` and typed text don't need it.
 - **Draft typed in the terminal (my call).** When an idle prompt box holds a draft, the text box and `Enter`
   are hidden (only the output and `Esc` show), so Meerkat never appends to or submits text it didn't write.
+- **Esc on an idle/done screen Meerkat can't read (user's decision, 2026-11-22).** That `Esc` also goes
+  through the confirm panel ("If this session is still running, Esc interrupts it; check the output above"),
+  because Herdr can report a running session as idle and `Esc` would then interrupt it. On a `blocked`
+  unrecognized screen `Esc` still sends at once.
 - Free text starting with `!` or `/` is sent as typed (it is the user's own command); the Send button reads
   "Send as command" so it isn't a surprise **(my call)**.
 - Confirm is an in-page panel, never `window.confirm`. Focus starts on Cancel. Errors show inline (`The prompt

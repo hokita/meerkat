@@ -59,6 +59,24 @@ test('answers a permission only after the in-page confirm and shows the last rep
   )
 })
 
+test('Esc on an idle screen Meerkat cannot read waits for the confirm', async ({
+  page,
+  meerkat,
+}) => {
+  const pane = agents.idle.pane_id
+  meerkat.fake.setRead(pane, screen('idle-draft.txt'))
+  const panel = await openReply(page, meerkat, /idle-one/)
+  await panel.getByRole('button', { name: 'Esc' }).click()
+  await expect(panel.getByRole('button', { name: 'Cancel' })).toBeFocused()
+  expect(inputs(meerkat)).toEqual([])
+  await panel
+    .getByRole('group', { name: 'Confirm reply' })
+    .getByRole('button', { name: 'Send' })
+    .click()
+  await expect(panel.getByText('Sent')).toBeVisible()
+  expect(inputs(meerkat)).toEqual([keys(pane, ['esc'])])
+})
+
 test('cancelling the confirm sends nothing', async ({ page, meerkat }) => {
   meerkat.fake.setRead(agents.blocked.pane_id, screen('permission-bash.txt'))
   await page.goto(meerkat.baseURL)

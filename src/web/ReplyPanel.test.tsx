@@ -332,16 +332,40 @@ describe('ReplyPanel unrecognized', () => {
 
   it.each<AgentStatus>(['idle', 'done'])(
     '%s (draft in the box): only Esc, no text box, no Enter, no digits',
-    async (status) => {
-      const { user, actions } = setup({ prompt: unrecognized, status })
+    (status) => {
+      setup({ prompt: unrecognized, status })
       expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Enter' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '1' })).not.toBeInTheDocument()
       expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Esc'])
+    }
+  )
+
+  it.each<AgentStatus>(['idle', 'done'])(
+    '%s (draft in the box): Esc goes through the confirm panel',
+    async (status) => {
+      const { user, actions } = setup({ prompt: unrecognized, status })
       await user.click(screen.getByRole('button', { name: 'Esc' }))
+      expect(actions()).toEqual([])
+      expect(
+        screen.getByText(
+          'Send "Esc" to meerkat-audit? If this session is still running, Esc interrupts it; check the output above.'
+        )
+      ).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
+      const panel = screen.getByRole('group', { name: 'Confirm reply' })
+      await user.click(within(panel).getByRole('button', { name: 'Send' }))
       expect(actions()).toEqual([{ type: 'keys', keys: ['esc'] }])
     }
   )
+
+  it('idle (draft in the box): cancelling the Esc confirm sends nothing', async () => {
+    const { user, actions } = setup({ prompt: unrecognized, status: 'idle' })
+    await user.click(screen.getByRole('button', { name: 'Esc' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('group', { name: 'Confirm reply' })).not.toBeInTheDocument()
+    expect(actions()).toEqual([])
+  })
 })
 
 describe('ReplyPanel visibility and state', () => {
