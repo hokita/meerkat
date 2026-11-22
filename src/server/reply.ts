@@ -29,6 +29,7 @@ export interface ReplyDeps {
 
 export const MAX_BODY_BYTES = 8192
 export const REPLY_MEMORY_MS = 300_000
+export const REPLY_MEMORY_MAX = 500
 const MAX_SUMMARY_CHARS = 80
 
 type Waiting = Exclude<Prompt, { kind: 'none' }>
@@ -39,7 +40,7 @@ interface Plan {
   summary: string
 }
 
-export function createReplyMemory(now: () => number = Date.now): ReplyMemory {
+export function createReplyMemory(now: () => number = () => performance.now()): ReplyMemory {
   const results = new Map<string, { at: number; result: ReplyResult }>()
   const locks = new Map<string, Promise<void>>()
 
@@ -63,6 +64,10 @@ export function createReplyMemory(now: () => number = Date.now): ReplyMemory {
       const key = keyOf(paneId, replyId)
       results.delete(key)
       results.set(key, { at: now(), result })
+      for (const oldest of results.keys()) {
+        if (results.size <= REPLY_MEMORY_MAX) break
+        results.delete(oldest)
+      }
     },
     withLock(paneId, task) {
       const previous = locks.get(paneId) ?? Promise.resolve()
@@ -149,38 +154,60 @@ function herdrError(error: unknown, sent: number): ReplyResult {
   return { status: 502, body: { error: 'herdr_error', code, sent } }
 }
 
+interface Outcome {
+  result: ReplyResult
+  sent: number
+  summary: string | null
+}
+
+function refusal(status: number, body: unknown): Outcome {
+  return { result: { status, body }, sent: 0, summary: null }
+}
+
 async function answer(
   deps: ReplyDeps,
   paneId: string,
   fingerprint: string,
   action: ReplyAction
-): Promise<ReplyResult> {
+): Promise<Outcome> {
   let read: PromptRead | 'gone'
   try {
     read = await deps.read(paneId)
   } catch (error) {
-    return herdrError(error, 0)
+    return { result: herdrError(error, 0), sent: 0, summary: null }
   }
-  if (read === 'gone') return { status: 404, body: { error: 'session_closed' } }
+  if (read === 'gone') return refusal(404, { error: 'session_closed' })
   const { prompt } = read
-  if (prompt.kind === 'none') return { status: 409, body: { error: 'not_waiting' } }
+  if (prompt.kind === 'none') return refusal(409, { error: 'not_waiting' })
   if (prompt.fingerprint !== fingerprint) {
-    return { status: 409, body: { error: 'prompt_changed', prompt } }
+    return refusal(409, { error: 'prompt_changed', prompt })
   }
   const plan = planFor(prompt, action)
-  if (plan === null) return { status: 400, body: { error: 'invalid_action' } }
+  if (plan === null) return refusal(400, { error: 'invalid_action' })
   let sent = 0
   for (const step of plan.steps) {
     try {
       await step(deps.sender, paneId)
     } catch (error) {
-      return herdrError(error, sent)
+      return { result: herdrError(error, sent), sent, summary: null }
     }
     sent += 1
   }
-  deps.supervisor.recordReply(paneId, clip(plan.summary))
-  deps.supervisor.refreshProgress(paneId)
-  return { status: 200, body: { sent } }
+  return { result: { status: 200, body: { sent } }, sent, summary: clip(plan.summary) }
+}
+
+function bestEffort(task: () => void): void {
+  try {
+    task()
+  } catch {
+    return
+  }
+}
+
+function afterSend(deps: ReplyDeps, paneId: string, outcome: Outcome): void {
+  const { summary } = outcome
+  if (summary !== null) bestEffort(() => deps.supervisor.recordReply(paneId, summary))
+  if (outcome.sent > 0) bestEffort(() => deps.supervisor.refreshProgress(paneId))
 }
 
 export async function handleReply(
@@ -196,9 +223,10 @@ export async function handleReply(
   return deps.memory.withLock(paneId, async () => {
     const again = deps.memory.recall(paneId, replyId)
     if (again !== undefined) return again
-    const result = await answer(deps, paneId, fingerprint, action)
-    deps.memory.remember(paneId, replyId, result)
-    return result
+    const outcome = await answer(deps, paneId, fingerprint, action)
+    deps.memory.remember(paneId, replyId, outcome.result)
+    afterSend(deps, paneId, outcome)
+    return outcome.result
   })
 }
 

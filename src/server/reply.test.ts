@@ -1,14 +1,16 @@
 import { Readable } from 'node:stream'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { HerdrConnection, Prompt } from '../shared/types.js'
 import { HerdrProtocolError } from './herdr/protocol.js'
 import type { ReplyKey, ReplySender } from './herdr/reply-sender.js'
 import type { PromptRead } from './read-prompt.js'
 import {
   MAX_BODY_BYTES,
+  REPLY_MEMORY_MAX,
   REPLY_MEMORY_MS,
   createReplyMemory,
   handleReply,
+  readBody,
   serveReply,
   type ReplyDeps,
 } from './reply.js'
@@ -65,6 +67,7 @@ interface SetupOptions {
   herdr?: HerdrConnection
   failAt?: { step: number; error: Error }
   gate?: Promise<void>
+  bookkeepingThrows?: boolean
 }
 
 function setup(opts: SetupOptions = {}) {
@@ -94,8 +97,14 @@ function setup(opts: SetupOptions = {}) {
         herdr: opts.herdr ?? 'connected',
         board: { attention: [], working: [], idle: [] },
       }),
-      recordReply: (paneId, summary) => replies.push([paneId, summary]),
-      refreshProgress: (paneId) => refreshed.push(paneId),
+      recordReply: (paneId, summary) => {
+        replies.push([paneId, summary])
+        if (opts.bookkeepingThrows === true) throw new Error('record failed')
+      },
+      refreshProgress: (paneId) => {
+        refreshed.push(paneId)
+        if (opts.bookkeepingThrows === true) throw new Error('refresh failed')
+      },
     },
     read: async (paneId): Promise<PromptRead | 'gone'> => {
       reads.push(paneId)
@@ -312,6 +321,29 @@ describe('handleReply Herdr errors', () => {
       ['sendText', PANE, 'hi'],
     ])
     expect(t.replies).toEqual([])
+    expect(t.refreshed).toEqual([PANE])
+  })
+
+  it('replays a partial freeText failure without pressing the number again', async () => {
+    const t = setup({
+      screens: [choice],
+      failAt: { step: 2, error: new HerdrProtocolError('pane_not_found', 'gone') },
+    })
+    const first = await handleReply(t.deps, PANE, request({ type: 'freeText', text: 'hi' }))
+    const second = await handleReply(t.deps, PANE, request({ type: 'freeText', text: 'hi' }))
+    expect(second).toEqual(first)
+    expect(t.calls).toHaveLength(2)
+    expect(t.reads).toHaveLength(1)
+  })
+
+  it('keeps the send result when bookkeeping throws', async () => {
+    const t = setup({ screens: [unrecognized], bookkeepingThrows: true })
+    const first = await handleReply(t.deps, PANE, request({ type: 'keys', keys: ['1'] }))
+    expect(first).toEqual({ status: 200, body: { sent: 1 } })
+    const second = await handleReply(t.deps, PANE, request({ type: 'keys', keys: ['1'] }))
+    expect(second).toEqual(first)
+    expect(t.calls).toEqual([['sendKeys', PANE, ['1']]])
+    expect(t.refreshed).toEqual([PANE])
   })
 
   it('reports other send errors with code unknown', async () => {
@@ -492,5 +524,41 @@ describe('serveReply', () => {
     expect(result).toEqual({ status: 413, body: { error: 'body_too_large' } })
     expect(t.reads).toEqual([])
     expect(t.calls).toEqual([])
+  })
+})
+
+describe('createReplyMemory', () => {
+  const ok = { status: 200, body: { sent: 1 } }
+
+  it(`keeps at most ${REPLY_MEMORY_MAX} results, dropping the oldest first`, () => {
+    const memory = createReplyMemory(() => 0)
+    for (let i = 0; i <= REPLY_MEMORY_MAX; i += 1) memory.remember(PANE, `reply-${i}`, ok)
+    expect(memory.recall(PANE, 'reply-0')).toBeUndefined()
+    expect(memory.recall(PANE, 'reply-1')).toEqual(ok)
+    expect(memory.recall(PANE, `reply-${REPLY_MEMORY_MAX}`)).toEqual(ok)
+  })
+
+  it('expires on the monotonic clock by default', () => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0)
+    try {
+      const memory = createReplyMemory()
+      memory.remember(PANE, 'reply-0001', ok)
+      clock.mockReturnValue(REPLY_MEMORY_MS - 1)
+      expect(memory.recall(PANE, 'reply-0001')).toEqual(ok)
+      clock.mockReturnValue(REPLY_MEMORY_MS)
+      expect(memory.recall(PANE, 'reply-0001')).toBeUndefined()
+    } finally {
+      clock.mockRestore()
+    }
+  })
+})
+
+describe('readBody', () => {
+  it('rejects when the request closes before it ends', async () => {
+    const req = new Readable({ read: () => undefined })
+    const reading = readBody(req, MAX_BODY_BYTES)
+    req.push(Buffer.from('{"replyId":'))
+    req.destroy()
+    await expect(reading).rejects.toThrow('request closed before the body ended')
   })
 })
