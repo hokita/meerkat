@@ -599,6 +599,55 @@ describe('supervisor', () => {
     )
   })
 
+  it('a blocked card shows its newest sentence on a short pane', async () => {
+    const fake = await startFake()
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), PROGRESS)
+    supervisor.start()
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Halfway there.')
+    )
+    fake.setBusyViewport('wJ:p1', 28)
+    fake.setRead('wJ:p1', '⏺ Need your OK to proceed.\n─────\n Do you want to proceed?\n ❯ 1. Yes')
+    fake.pushStatus('wJ:p1', 'blocked')
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Need your OK to proceed.')
+    )
+  })
+
+  it('a working card on a short pane updates on the interval', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'working' })])
+    fake.setBusyViewport('wJ:p1', 28)
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), PROGRESS)
+    supervisor.start()
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Halfway there.')
+    )
+    fake.setRead('wJ:p1', '⏺ Almost done.')
+    await vi.waitFor(() => expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Almost done.'))
+  })
+
+  it('a failed busy read keeps the previous sentence and its age', async () => {
+    const fake = await startFake()
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), PROGRESS)
+    supervisor.start()
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Halfway there.')
+    )
+    const before = cardOf(supervisor, 'wJ:p1')?.progress
+    fake.setBusyViewport('wJ:p1', 28)
+    fake.setVisibleReadError('wJ:p1', { code: 'agent_not_idle', message: 'x' })
+    fake.setRead('wJ:p1', '⏺ Need your OK to proceed.')
+    const reads = count(fake, 'agent.read')
+    fake.pushStatus('wJ:p1', 'blocked')
+    await vi.waitFor(() => expect(cardOf(supervisor, 'wJ:p1')?.status).toBe('blocked'))
+    await vi.waitFor(() => expect(count(fake, 'agent.read')).toBeGreaterThanOrEqual(reads + 2))
+    await new Promise((resolve) => setTimeout(resolve, 2 * PROGRESS.progressIntervalMs))
+    expect(cardOf(supervisor, 'wJ:p1')?.progress).toEqual(before)
+  })
+
   it('refreshProgress re-reads a card at once', async () => {
     const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
     fake.setRead('wJ:p1', '⏺ Halfway there.')
