@@ -29,6 +29,7 @@ export interface Supervisor {
   current(): SupervisorState
   card(paneId: string): Card | undefined
   recordReply(paneId: string, summary: string): void
+  refreshProgress(paneId: string): void
   onChange(listener: (state: SupervisorState) => void): () => void
 }
 
@@ -346,6 +347,9 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
       if (!board.cards.has(paneId)) return
       board = applyReply(board, paneId, summary, now())
       publish()
+    },
+    refreshProgress(paneId) {
+      poller.refresh(paneId)
     },
     onChange(listener) {
       listeners.add(listener)

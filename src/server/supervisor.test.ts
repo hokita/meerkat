@@ -582,6 +582,23 @@ describe('supervisor', () => {
     )
   })
 
+  it('refreshProgress re-reads a card at once', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), {
+      progressIntervalMs: 60_000,
+    })
+    supervisor.start()
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Halfway there.')
+    )
+    fake.setRead('wJ:p1', '⏺ Answered from Meerkat.')
+    supervisor.refreshProgress('wJ:p1')
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Answered from Meerkat.')
+    )
+  })
+
   it('a status change triggers a read of an idle card', async () => {
     const fake = await startFake()
     fake.setRead('wJ:p1', '⏺ Halfway there.')
