@@ -1,6 +1,8 @@
 import type { Card } from '../shared/types'
 import { formatElapsed } from './elapsed'
 
+const REPLYABLE: ReadonlySet<Card['status']> = new Set(['blocked', 'idle', 'done'])
+
 interface CardViewProps {
   card: Card
   now: number
@@ -27,9 +29,15 @@ export function CardView({ card, now, stale = false, onOpen }: CardViewProps) {
           </span>
         </>
       )}
+      {card.lastReply !== null && (
+        <span className="card-last-reply">
+          {`${card.lastReply.summary} from Meerkat · ${formatElapsed(now - card.lastReply.at, false)} ago`}
+        </span>
+      )}
       <span className="card-workspace">{card.workspaceId}</span>
       <span className="card-footer">
         <span className={`pill pill-${card.status}`}>{card.status}</span>
+        {REPLYABLE.has(card.status) && <span className="card-reply">Reply</span>}
         <span className="card-elapsed">
           {formatElapsed(now - card.since, card.sinceIsLowerBound)}
         </span>
