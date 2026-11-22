@@ -14,6 +14,8 @@ still working (and for how long), and which are idle, kept live without reloadin
 
 ## Goals
 
+> Update 2026-11-23: the board now has four columns; see "Update 2026-11-23: four columns" below. The list below is the original.
+
 - Three live columns, layout A "Needs you first" (picked by the user from the mockups at
   https://claude.ai/artifact/5SxcPADeFwceAWCBdcHYe1):
   1. **Needs attention**: `agent_status` is `done` or `blocked`.
@@ -26,6 +28,29 @@ still working (and for how long), and which are idle, kept live without reloadin
 - Live updates: Herdr status changes reach the browser without polling or reloading.
 - Survives Herdr restarting: Meerkat reconnects and rebuilds its state by itself.
 - Starts with `npm start` (build + serve), then the user opens http://localhost:4321.
+
+### Update 2026-11-23: four columns
+
+The user approved splitting Needs attention in two (option A, 2026-11-22), because a session that asks a question
+and a session that has finished need different things from the user. The board now has four columns, left to
+right (top to bottom on a phone):
+
+| Column          | Herdr `agent_status`      | Order                                  |
+| --------------- | ------------------------- | -------------------------------------- |
+| Waiting for you | `blocked`                 | longest waiting first                  |
+| Done            | `done`                    | longest done first **(my call)**       |
+| Working         | `working`                 | longest running first                  |
+| Idle            | `idle`, `unknown`, others | by name                                |
+
+- The column still comes only from Herdr's status (`columnOf` in `src/server/board.ts`); the board view sent over
+  SSE has the keys `waiting`, `done`, `working`, `idle` (replacing `attention`).
+- Every column is always shown with its count badge; an empty one says "Nothing here", as before.
+- Widths **(my call)**: four columns from 1100 px, a 2 × 2 grid from 720 px to 1099 px (Waiting for you and Done
+  on top), one stacked column below 720 px. No horizontal scrolling at any width.
+- Unchanged: cards, pills, progress sentences, the Reply label (blocked, done, idle), the reply drawer, live
+  updates and the reply-superseding rules.
+- A browser tab left open across a Meerkat upgrade gets the new board shape from the new server while running
+  the old page; it must be reloaded once.
 
 ## Non-goals
 
@@ -225,7 +250,7 @@ check, test, e2e jobs, `setup-node` pinned) is copied from owlet.
   (`ECONNREFUSED`, `ENOENT`, Herdr restarting): mark disconnected, back off from 0.5 s doubling up to 5 s, retry
   forever. On reconnect, rebuild from a fresh snapshot.
 - **Board** (pure, injectable clock): cards keyed by `pane_id` with name, repo, terminal title, workspace id,
-  status, and `since`. Column from status. Sorting **(my call)**: Needs attention by longest waiting first;
+  status, and `since`. Column from status. Sorting **(my call)**: Needs attention by longest waiting first (since 2026-11-23: Waiting for you and Done, each longest first);
   Working by longest running first; Idle by name.
 - **App/repo** **(my call, refining "from cwd")**: the workspace's `worktree.repo_name` if present; otherwise,
   if `cwd` is under `~/.herdr/worktrees/<repo>/<branch>`, use `<repo>`; otherwise the last part of `cwd`. Using
@@ -243,7 +268,7 @@ check, test, e2e jobs, `setup-node` pinned) is copied from owlet.
 
 ### Browser
 
-- `EventSource('/api/events')` → board state. Three columns with count badges. Elapsed times tick every second
+- `EventSource('/api/events')` → board state. Three columns with count badges (four since 2026-11-23). Elapsed times tick every second
   on the client from `since`.
 - Tap a card → a drawer fetches the output once, with a refresh button **(my call: no live tail)**. Output goes in
   a `<pre>` as a React text child, never `dangerouslySetInnerHTML`. If the card disappears from the board while

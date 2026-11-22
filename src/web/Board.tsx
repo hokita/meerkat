@@ -38,12 +38,13 @@ export function Board({ board, now, stale, onOpen }: BoardProps) {
   return (
     <div className="board">
       <ColumnView
-        title="Needs attention"
-        cards={board.attention}
+        title="Waiting for you"
+        cards={board.waiting}
         now={now}
         stale={stale}
         onOpen={onOpen}
       />
+      <ColumnView title="Done" cards={board.done} now={now} stale={stale} onOpen={onOpen} />
       <ColumnView title="Working" cards={board.working} now={now} stale={stale} onOpen={onOpen} />
       <ColumnView title="Idle" cards={board.idle} now={now} stale={stale} onOpen={onOpen} />
     </div>

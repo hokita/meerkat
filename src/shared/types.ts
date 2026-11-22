@@ -1,6 +1,6 @@
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown'
 
-export type Column = 'attention' | 'working' | 'idle'
+export type Column = 'waiting' | 'done' | 'working' | 'idle'
 
 export interface Progress {
   text: string
@@ -31,7 +31,8 @@ export interface Card {
 }
 
 export interface BoardView {
-  attention: Card[]
+  waiting: Card[]
+  done: Card[]
   working: Card[]
   idle: Card[]
 }

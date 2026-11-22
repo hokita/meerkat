@@ -44,7 +44,7 @@ class StubEventSource {
 }
 
 const original = globalThis.EventSource
-const board: BoardView = { attention: [], working: [], idle: [] }
+const board: BoardView = { waiting: [], done: [], working: [], idle: [] }
 
 beforeEach(() => {
   StubEventSource.instances = []
