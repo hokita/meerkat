@@ -27,7 +27,8 @@ Each card shows the session's latest update and how long ago it changed.
 
 Meerkat can answer a session from its drawer. It understands Claude Code choice lists, permission
 prompts (any approving option asks for a confirm step first) and a session waiting at its prompt. For
-anything else it shows the output, a keypad (1-9, Enter, Esc) and a text box.
+anything else it shows the output with a keypad (1-9 and Enter ask for a confirm, Esc does not) and a
+text box, or only Esc when the prompt box may hold a draft (an idle or done session).
 
 Answering a worker from Meerkat skips the orchestrator's relay. The card shows `... from Meerkat`
 after a reply.
