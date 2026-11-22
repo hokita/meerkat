@@ -7,7 +7,7 @@ export interface PolledPane {
 
 export interface ProgressPoller {
   sync(panes: readonly PolledPane[]): void
-  stop(): void
+  stop(): Promise<void>
 }
 
 export interface ProgressPollerOptions {
@@ -24,6 +24,7 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
   const queue = new Set<string>()
   let reading: string | null = null
   let draining = false
+  let lastDrain: Promise<void> = Promise.resolve()
   let stopped = false
 
   async function readOrNull(paneId: string): Promise<string | null> {
@@ -42,8 +43,11 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
     }
   }
 
-  async function drain(): Promise<void> {
-    if (draining) return
+  function drain(): void {
+    if (!draining) lastDrain = runDrain()
+  }
+
+  async function runDrain(): Promise<void> {
     draining = true
     try {
       while (!stopped) {
@@ -67,7 +71,7 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
     for (const [paneId, status] of known) {
       if (status === 'working' && paneId !== reading) queue.add(paneId)
     }
-    void drain()
+    drain()
   }, intervalMs)
 
   return {
@@ -78,12 +82,13 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
       for (const [paneId, status] of known) {
         if (previous.get(paneId) !== status) queue.add(paneId)
       }
-      void drain()
+      drain()
     },
     stop() {
       stopped = true
       clearInterval(timer)
       queue.clear()
+      return lastDrain
     },
   }
 }

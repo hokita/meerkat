@@ -293,4 +293,24 @@ describe('createProgressPoller', () => {
     await settle()
     expect(calls).toEqual(['a', 'a'])
   })
+
+  it('stop resolves only after the in-flight read settles', async () => {
+    const { poller, pending } = setup()
+    active = poller
+    poller.sync([{ paneId: 'a', status: 'working' }])
+    await settle()
+    let stopped = false
+    const stopping = poller.stop().then(() => {
+      stopped = true
+    })
+    await settle()
+    expect(stopped).toBe(false)
+    pending[0]!.resolve('late')
+    await stopping
+    expect(stopped).toBe(true)
+  })
+  it('stop resolves immediately when idle', async () => {
+    const { poller } = setup()
+    await poller.stop()
+  })
 })

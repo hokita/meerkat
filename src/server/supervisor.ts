@@ -320,11 +320,11 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
     },
     async stop() {
       stopped = true
-      poller.stop()
+      const pollerStopped = poller.stop()
       clearTimers()
       closeSubscription()
       signal()
-      await running
+      await Promise.all([running, pollerStopped])
     },
     current() {
       return state

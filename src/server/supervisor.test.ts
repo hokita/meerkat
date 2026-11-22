@@ -283,7 +283,6 @@ describe('supervisor', () => {
     supervisor.onChange((state) => seen.push(state))
     clock = 3000
     await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(4))
-    await new Promise((resolve) => setTimeout(resolve, 30))
     const attention = seen.map((state) => state.board.attention.map((c) => c.paneId))
     expect(attention.every((ids) => ids.includes('wJ:p1'))).toBe(true)
     expect(supervisor.current().board.attention).toEqual([
