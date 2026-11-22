@@ -163,6 +163,11 @@ Idle look-alikes: `idle-draft.txt` (`❯ half typed draft`), `idle-placeholder.t
 `❯ Try "fix lint errors"`), `idle-suggestion.txt` (after a turn Claude Code may show a suggested next prompt,
 `❯ ls -la made-by-bash.txt`), `prose-list-idle.txt` (a numbered list in Claude's reply, then an empty box).
 Placeholder and suggestion are dim (SGR 2) in the ANSI read but identical to a draft in the text read.
+`idle-suggestion.ansi.txt` holds the prompt box of the ANSI read (`source: 'visible', format: 'ansi'`) with
+the suggestion words replaced by neutral ones: the rules are `ESC[0m ESC[38;2;136;136;136m ─… ESC[0m` and the
+line is `❯ ESC[0m ESC[2m<suggestion> ESC[0m`, lines ending in `\r\n`. The placeholder line had exactly the
+same styling. No ANSI read of an empty box or of a draft was kept, so tests build those from the text
+fixtures (a draft drawn with no SGR at all must read as a draft).
 
 Rules. A screen is recognized only if **all** hold; any miss gives `unrecognized`:
 
@@ -189,9 +194,16 @@ Rules. A screen is recognized only if **all** hold; any miss gives `unrecognized
 6. **Idle prompt** if Herdr's status is `idle` or `done` and the block after the second-to-last rule is a
    prompt box whose line starts with `❯` (empty or with the user's half-typed draft). A non-empty draft means
    `unrecognized` **(my call: Meerkat must not append to text the user typed in the terminal)**. The text read
-   cannot tell Claude Code's dim placeholder or suggestion from a draft, so those screens are `unrecognized`
-   too (fail safe; the user sees the keypad fallback). Telling them apart needs the ANSI read and is left out
-   of this version.
+   cannot tell Claude Code's dim placeholder (`Try "fix lint errors"`) or suggested next prompt from a draft,
+   so when the text read shows anything after `❯` in the idle box, Meerkat does **one** extra read,
+   `agent.read {source: 'visible', format: 'ansi', strip_ansi: false}`, finds the same prompt box (the `❯`
+   line between the last two rules) and parses its SGR sequences. The box counts as **empty** only if every
+   non-whitespace character after `❯` is drawn while the faint attribute (SGR `2`) is on, as in
+   `idle-suggestion.ansi.txt` (`❯ ESC[0m ESC[2m<text> ESC[0m`). Any character drawn without faint, an SGR
+   sequence Meerkat can't parse, a box that isn't found, a box whose text differs from the text read, a
+   multi-line box, or a failed read means **draft** → `unrecognized`. Only the text read is fingerprinted (the
+   suggestion text included), so a new suggestion changes the fingerprint. Sending is unchanged: `prompt` is
+   `agent.prompt`, which in Task 0 replaced a showing suggestion with the pasted text and submitted it.
 7. Approving options: any permission option whose label starts with `Yes`, **and any label Meerkat doesn't
    know** (fail safe). Only labels starting with `No` skip the confirm.
 
