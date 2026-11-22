@@ -75,6 +75,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   let subscription: HerdrSubscription | null = null
   let snapshotDue = false
   let outageLogged = false
+  let observationGap = false
   let backoff = backoffInitialMs
   let streamFailed = false
   let snapshotInFlight = false
@@ -185,7 +186,8 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
       statusesDuringSnapshot = []
     }
     if (stopped) return snapshot
-    board = boardFromSnapshot(board, snapshot, now(), home)
+    board = boardFromSnapshot(observationGap ? null : board, snapshot, now(), home)
+    observationGap = false
     for (const status of received) board = applyStatusEvent(board, status, status.receivedAt)
     herdr = 'connected'
     outageLogged = false
@@ -276,6 +278,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
         closeSubscription()
         streamFailed = false
         snapshotDue = false
+        observationGap = true
         if (!outageLogged) log(`Herdr not reachable: ${reasonOf(error)}`)
         outageLogged = true
         setConnection('disconnected')

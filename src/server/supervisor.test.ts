@@ -294,6 +294,44 @@ describe('supervisor', () => {
     await vi.waitFor(() => expect(subscribedPanes(fake, 1)).toEqual(['wZ:p1']))
   })
 
+  it('treats every status time as a lower bound after an outage, even when nothing looks changed', async () => {
+    const fake = await startFake()
+    let clock = 1000
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), {
+      now: () => clock,
+    })
+    supervisor.start()
+    await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
+    clock = 2000
+    fake.pushStatus('wJ:p1', 'done')
+    await vi.waitFor(() =>
+      expect(supervisor.current().board.attention).toEqual([
+        expect.objectContaining({ paneId: 'wJ:p1', since: 2000, sinceIsLowerBound: false }),
+      ])
+    )
+    await fake.stop()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('disconnected'))
+    expect(supervisor.current().board.attention).toEqual([
+      expect.objectContaining({ paneId: 'wJ:p1', since: 2000, sinceIsLowerBound: false }),
+    ])
+    fake.setSnapshot(
+      fakeSnapshot({
+        agents: [
+          fakeAgent({ pane_id: 'wJ:p1', agent_status: 'done' }),
+          fakeAgent({ pane_id: 'wK:p1' }),
+        ],
+      })
+    )
+    clock = 5000
+    await fake.restart()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
+    const { attention, working, idle } = supervisor.current().board
+    expect(attention.map((card) => card.paneId)).toEqual(['wJ:p1'])
+    for (const card of [...attention, ...working, ...idle]) {
+      expect(card).toMatchObject({ since: 5000, sinceIsLowerBound: true })
+    }
+  })
+
   it('stays disconnected while Herdr is absent, backing off up to the cap, then connects', async () => {
     const fake = await startFake()
     await fake.stop()
