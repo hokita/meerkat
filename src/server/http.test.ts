@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import { fakeSnapshot, startFakeHerdr, type FakeHerdr } from '../../test-support/fake-herdr.js'
 import type { BoardView, Card } from '../shared/types.js'
+import { createToken } from './guard.js'
 import { createHerdrClient } from './herdr/client.js'
 import { createHttpServer, isAllowedHost, listen, PortInUseError } from './http.js'
 import type { SupervisorState } from './supervisor.js'
@@ -84,6 +85,7 @@ interface Harness {
   fake: FakeHerdr
   stub: Stub
   staticParent: string
+  token: string
 }
 
 async function harness(
@@ -96,7 +98,10 @@ async function harness(
   const staticParent = await mkdtemp(join(tmpdir(), 'mk-static-'))
   const staticDir = join(staticParent, 'public')
   await mkdir(join(staticDir, 'assets'), { recursive: true })
-  await writeFile(join(staticDir, 'index.html'), '<!doctype html><title>m</title>')
+  await writeFile(
+    join(staticDir, 'index.html'),
+    '<!doctype html><meta name="meerkat-token" content=""><title>m</title>'
+  )
   await writeFile(join(staticDir, 'assets', 'a.js'), 'export {}')
   await writeFile(join(staticParent, 'package.json'), '{"secret":true}')
   const stub = stubSupervisor(opts.state ?? { herdr: 'connected', board: emptyBoard })
@@ -104,10 +109,12 @@ async function harness(
   await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', () => resolve()))
   const port = (probe.address() as AddressInfo).port
   await new Promise<void>((resolve) => probe.close(() => resolve()))
+  const token = createToken()
   const real = createHttpServer({
     supervisor: stub,
     client: createHerdrClient({ socketPath: fake.socketPath, timeoutMs: 500 }),
     port,
+    token,
     staticDir,
     heartbeatMs: opts.heartbeatMs,
   })
@@ -118,7 +125,7 @@ async function harness(
     await fake.stop()
     await rm(staticParent, { recursive: true, force: true })
   })
-  return { port, fake, stub, staticParent }
+  return { port, fake, stub, staticParent, token }
 }
 
 interface Reply {
@@ -481,6 +488,68 @@ describe('static files and fallback', () => {
     const api = await get(h, '/api/nothing')
     expect(api.status).toBe(404)
     expect(api.headers['content-type']).toContain('application/json')
+  })
+})
+
+describe('guard headers and token', () => {
+  it('writes the token into index.html on / and on the SPA fallback', async () => {
+    const h = await harness()
+    for (const route of ['/', '/some/route']) {
+      const reply = await get(h, route)
+      expect(reply.body).toContain(`<meta name="meerkat-token" content="${h.token}"`)
+    }
+  })
+
+  it('sends frame-blocking headers on every HTML response', async () => {
+    const h = await harness()
+    for (const route of ['/', '/some/route']) {
+      const reply = await get(h, route)
+      expect(reply.headers['x-frame-options']).toBe('DENY')
+      expect(reply.headers['content-security-policy']).toBe("frame-ancestors 'none'")
+      expect(reply.headers['x-content-type-options']).toBe('nosniff')
+      expect(reply.headers['cache-control']).toBe('no-store')
+    }
+  })
+
+  it('does not put the token in non-HTML responses', async () => {
+    const h = await harness()
+    const reply = await get(h, '/assets/a.js')
+    expect(reply.body).not.toContain(h.token)
+    expect(reply.headers['x-frame-options']).toBeUndefined()
+  })
+
+  it('answers OPTIONS on the reply route with 405, Allow: POST and no CORS headers', async () => {
+    const h = await harness()
+    const reply = await get(h, '/api/sessions/w1H:p1/reply', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://evil.example',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'x-meerkat-token,content-type',
+      },
+    })
+    expect(reply.status).toBe(405)
+    expect(reply.headers['allow']).toBe('POST')
+    expect(Object.keys(reply.headers).filter((k) => k.startsWith('access-control-'))).toEqual([])
+    expect(h.fake.received).toEqual([])
+  })
+
+  it('never logs the token', async () => {
+    const calls: unknown[][] = []
+    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((name) => {
+      const original = console[name]
+      console[name] = (...args: unknown[]) => void calls.push(args)
+      return () => {
+        console[name] = original
+      }
+    })
+    try {
+      const h = await harness()
+      await get(h, '/')
+      expect(JSON.stringify(calls)).not.toContain(h.token)
+    } finally {
+      for (const restore of spies) restore()
+    }
   })
 })
 
