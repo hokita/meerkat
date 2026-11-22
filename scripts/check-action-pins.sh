@@ -4,6 +4,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dir="${1:-$root/.github/workflows}"
 pinned='^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$'
+mentions='(^|[^A-Za-z0-9_-])["'"'"']?uses["'"'"']?[[:space:]]*:'
+supported='^[[:space:]]*(-[[:space:]]+)?(uses|"uses"|'"'"'uses'"'"')[[:space:]]*:'
 
 shopt -s nullglob
 files=("$dir"/*.yml "$dir"/*.yaml)
@@ -13,7 +15,7 @@ if [ "${#files[@]}" -eq 0 ]; then
 fi
 
 status=0
-matches="$(grep -nHE '^[[:space:]]*(-[[:space:]]+)?uses:' "${files[@]}")" || status=$?
+matches="$(grep -nHE "$mentions" "${files[@]}")" || status=$?
 if [ "$status" -gt 1 ]; then
   echo "could not read workflow files in $dir"
   exit 1
@@ -26,13 +28,19 @@ while IFS= read -r line; do
   rest="${line#*:}"
   location="$location:${rest%%:*}"
   text="${rest#*:}"
-  value="${text#*uses:}"
+  shown="${text#"${text%%[![:space:]]*}"}"
+  if ! [[ "$text" =~ $supported ]]; then
+    echo "unsupported uses syntax: $location: $shown"
+    bad=1
+    continue
+  fi
+  value="${text#"${BASH_REMATCH[0]}"}"
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   value="${value#[\'\"]}"
   value="${value%[\'\"]}"
   if ! grep -qE "$pinned" <<<"$value"; then
-    echo "unpinned action: $location: ${text#"${text%%[![:space:]]*}"}"
+    echo "unpinned action: $location: $shown"
     bad=1
   fi
 done <<<"$matches"

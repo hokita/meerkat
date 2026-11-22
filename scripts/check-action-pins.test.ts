@@ -73,6 +73,49 @@ describe('check-action-pins.sh', () => {
     expect(result.stdout).toContain('x.yaml:7:')
   })
 
+  it('fails a double-quoted uses key with a tag pin', () => {
+    writeFileSync(join(dir, 'ci.yml'), workflow('actions/checkout@v4').replace('uses', '"uses"'))
+    const result = run()
+    expect(result.status).toBe(1)
+    expect(result.stdout).toContain('unpinned action')
+  })
+
+  it('fails a single-quoted uses key with a tag pin', () => {
+    writeFileSync(join(dir, 'ci.yml'), workflow('actions/checkout@v4').replace('uses', "'uses'"))
+    const result = run()
+    expect(result.status).toBe(1)
+    expect(result.stdout).toContain('unpinned action')
+  })
+
+  it('passes a quoted uses key with a SHA pin', () => {
+    writeFileSync(
+      join(dir, 'ci.yml'),
+      workflow('actions/checkout@11d5960a326750d5838078e36cf38b85af677262').replace(
+        'uses',
+        '"uses"'
+      )
+    )
+    expect(run().status).toBe(0)
+  })
+
+  it('rejects flow-style uses', () => {
+    writeFileSync(
+      join(dir, 'ci.yml'),
+      workflow('x').replace(
+        'uses: x',
+        '{uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262}'
+      )
+    )
+    const result = run()
+    expect(result.status).toBe(1)
+    expect(result.stdout).toContain('unsupported uses syntax')
+  })
+
+  it('ignores keys that only contain the word uses', () => {
+    writeFileSync(join(dir, 'ci.yml'), `${workflow(`actions/checkout@${SHA}`)}excuses: none\n`)
+    expect(run().status).toBe(0)
+  })
+
   it('fails when the directory has no workflow files', () => {
     const result = run()
     expect(result.status).toBe(1)
