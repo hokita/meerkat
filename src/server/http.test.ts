@@ -3,9 +3,10 @@ import http from 'node:http'
 import net, { type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import { fakeSnapshot, startFakeHerdr, type FakeHerdr } from '../../test-support/fake-herdr.js'
-import type { BoardView } from '../shared/types.js'
+import type { BoardView, Card } from '../shared/types.js'
 import { createHerdrClient } from './herdr/client.js'
 import { createHttpServer, isAllowedHost, listen, PortInUseError } from './http.js'
 import type { SupervisorState } from './supervisor.js'
@@ -46,6 +47,7 @@ interface Stub {
   state: SupervisorState
   listeners: Set<(state: SupervisorState) => void>
   current(): SupervisorState
+  card(paneId: string): Card | undefined
   onChange(listener: (state: SupervisorState) => void): () => void
   emit(state: SupervisorState): void
 }
@@ -55,6 +57,14 @@ function stubSupervisor(state: SupervisorState): Stub {
     state,
     listeners: new Set(),
     current: () => stub.state,
+    card: (paneId) => {
+      const found = [
+        ...stub.state.board.attention,
+        ...stub.state.board.working,
+        ...stub.state.board.idle,
+      ]
+      return found.find((card) => card.paneId === paneId)
+    },
     onChange(listener) {
       stub.listeners.add(listener)
       return () => {
@@ -326,20 +336,39 @@ describe('GET /api/events', () => {
   })
 })
 
+function outputHarness(paneId: string, status: 'blocked' | 'working' | 'idle' = 'blocked') {
+  const board = boardWith(paneId)
+  const card = board.attention[0] as Card
+  return harness({
+    state: {
+      herdr: 'connected',
+      board: { attention: [], working: [], idle: [{ ...card, status }] },
+    },
+  })
+}
+
+function screen(name: string): string {
+  return readFileSync(new URL(`../../test-support/screens/${name}`, import.meta.url), 'utf8')
+}
+
 describe('GET /api/sessions/:id/output', () => {
-  it('reads the pane through Herdr and returns sanitised text', async () => {
-    const h = await harness()
+  it('reads the pane through Herdr and returns sanitised text with a prompt', async () => {
+    const h = await outputHarness('w1H:p1', 'idle')
     const reply = await get(h, '/api/sessions/w1H:p1/output')
     expect(reply.status).toBe(200)
     expect(reply.headers['content-type']).toContain('application/json')
-    expect(JSON.parse(reply.body)).toEqual({ text: 'hello red world', truncated: false })
+    expect(JSON.parse(reply.body)).toEqual({
+      text: 'hello red world',
+      truncated: false,
+      prompt: { kind: 'unrecognized', fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) },
+    })
     expect(h.fake.received).toEqual([
       {
         method: 'agent.read',
         params: {
           target: 'w1H:p1',
           source: 'recent_unwrapped',
-          lines: 40,
+          lines: 120,
           format: 'text',
           strip_ansi: true,
         },
@@ -347,8 +376,28 @@ describe('GET /api/sessions/:id/output', () => {
     ])
   })
 
+  it('returns a recognized permission prompt with at most 40 lines', async () => {
+    const h = await outputHarness('w2:p1')
+    h.fake.setRead('w2:p1', screen('permission-bash.txt'))
+    const reply = await get(h, '/api/sessions/w2:p1/output')
+    const body = JSON.parse(reply.body) as {
+      text: string
+      prompt: { kind: string; fingerprint: string }
+    }
+    expect(body.prompt.kind).toBe('permission')
+    expect(body.prompt.fingerprint).toMatch(/^[0-9a-f]{64}$/)
+    expect(body.text.split('\n').length).toBeLessThanOrEqual(40)
+  })
+
+  it('returns no prompt for a working pane', async () => {
+    const h = await outputHarness('w2:p1', 'working')
+    h.fake.setRead('w2:p1', screen('permission-bash.txt'))
+    const reply = await get(h, '/api/sessions/w2:p1/output')
+    expect((JSON.parse(reply.body) as { prompt: unknown }).prompt).toEqual({ kind: 'none' })
+  })
+
   it('marks clipped output as truncated', async () => {
-    const h = await harness()
+    const h = await outputHarness('w2:p1', 'working')
     h.fake.setRead('w2:p1', 'x'.repeat(70000))
     const reply = await get(h, '/api/sessions/w2:p1/output')
     const body = JSON.parse(reply.body) as { text: string; truncated: boolean }
@@ -357,7 +406,7 @@ describe('GET /api/sessions/:id/output', () => {
   })
 
   it('accepts a percent-encoded pane id', async () => {
-    const h = await harness()
+    const h = await outputHarness('w1H:p1')
     const reply = await get(h, '/api/sessions/w1H%3Ap1/output')
     expect(reply.status).toBe(200)
   })
@@ -397,7 +446,7 @@ describe('GET /api/sessions/:id/output', () => {
   })
 
   it('answers 502 herdr_error when Herdr is unreachable', async () => {
-    const h = await harness()
+    const h = await outputHarness('w1H:p1')
     await h.fake.stop()
     const reply = await get(h, '/api/sessions/w1H:p1/output')
     expect(reply.status).toBe(502)

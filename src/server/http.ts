@@ -2,12 +2,11 @@ import { readFile, stat } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import type { HerdrClient } from './herdr/client.js'
-import { parseReadResponse } from './herdr/protocol.js'
-import { sanitizeOutput } from './output.js'
+import { readPrompt } from './read-prompt.js'
 import type { Supervisor, SupervisorState } from './supervisor.js'
 
 export interface HttpServerOptions {
-  supervisor: Pick<Supervisor, 'current' | 'onChange'>
+  supervisor: Pick<Supervisor, 'current' | 'onChange' | 'card'>
   client: HerdrClient
   port: number
   staticDir: string
@@ -116,20 +115,12 @@ async function serveOutput(
     return
   }
   try {
-    const line = await opts.client.request('agent.read', {
-      target,
-      source: 'recent_unwrapped',
-      lines: 40,
-      format: 'text',
-      strip_ansi: true,
-    })
-    const read = parseReadResponse(line)
-    if (read.kind === 'gone') {
+    const result = await readPrompt(opts, target)
+    if (result === 'gone') {
       sendJson(res, 404, { error: 'session_closed' })
       return
     }
-    const sanitized = sanitizeOutput(read.text)
-    sendJson(res, 200, { text: sanitized.text, truncated: read.truncated || sanitized.clipped })
+    sendJson(res, 200, result)
   } catch {
     sendJson(res, 502, { error: 'herdr_error' })
   }
