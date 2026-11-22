@@ -455,16 +455,64 @@ describe('OutputDrawer', () => {
       await screen.findByText('Permission: Bash command')
       rerender(drawer(fetchOutput, send, { status: 'working', statusEpoch: 2 }))
       rerender(drawer(fetchOutput, send, { status: 'blocked', statusEpoch: 3 }))
-      expect(screen.queryByText('npm test')).not.toBeInTheDocument()
-      for (const button of screen.queryAllByRole('button', { name: /Yes|No/ })) {
-        expect(button).toBeDisabled()
-      }
-      expect(screen.queryByRole('button', { name: 'Yes' })).not.toBeInTheDocument()
+      const stale = screen.getByRole('region', { name: 'Reply' })
+      const buttons = within(stale).getAllByRole('button')
+      expect(buttons.map((button) => button.textContent)).toContain('Yes')
+      for (const button of buttons) expect(button).toBeDisabled()
       finishRefetch(ok('screen B', false, second))
       expect(await screen.findByText('rm -rf build')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Allow B' })).toBeEnabled()
       expect(fetchOutput.mock.calls.length).toBeGreaterThanOrEqual(2)
       expect(send).not.toHaveBeenCalled()
+    })
+
+    it('keeps a draft across an epoch change and locks it until the refetch lands', async () => {
+      const user = userEvent.setup()
+      const idle: Prompt = { kind: 'idle', fingerprint: 'e'.repeat(64) }
+      const later: Prompt = { kind: 'idle', fingerprint: 'f'.repeat(64) }
+      let finishRefetch: (response: Response) => void = () => undefined
+      const refetch = new Promise<Response>((resolve) => (finishRefetch = resolve))
+      const fetchOutput = vi
+        .fn()
+        .mockResolvedValueOnce(ok('screen A', false, idle))
+        .mockImplementation(() => refetch.then((response) => response.clone()))
+      const send = vi.fn<Send>()
+      const { rerender } = render(drawer(fetchOutput, send, { status: 'idle', statusEpoch: 1 }))
+      await user.type(await screen.findByRole('textbox', { name: 'Message' }), 'half done')
+      rerender(drawer(fetchOutput, send, { status: 'idle', statusEpoch: 2 }))
+      const box = screen.getByRole('textbox', { name: 'Message' })
+      expect(box).toHaveValue('half done')
+      expect(box).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+      finishRefetch(ok('screen B', false, later))
+      await screen.findByText('screen B')
+      expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('half done')
+      expect(screen.getByRole('textbox', { name: 'Message' })).toBeEnabled()
+      expect(send).not.toHaveBeenCalled()
+    })
+
+    it('keeps the prompt changed notice when the epoch changes at the same time', async () => {
+      const user = userEvent.setup()
+      const fresh: Prompt = { ...permission, fingerprint: 'c'.repeat(64), request: 'npm run lint' }
+      let answer: (result: ReplyResult) => void = () => undefined
+      const send = vi.fn<Send>(() => new Promise<ReplyResult>((resolve) => (answer = resolve)))
+      let finishRefetch: (response: Response) => void = () => undefined
+      const refetch = new Promise<Response>((resolve) => (finishRefetch = resolve))
+      const fetchOutput = vi
+        .fn()
+        .mockResolvedValueOnce(ok('before', false, permission))
+        .mockImplementation(() => refetch.then((response) => response.clone()))
+      const { rerender } = render(drawer(fetchOutput, send, { status: 'blocked', statusEpoch: 1 }))
+      await screen.findByText('before')
+      await user.click(screen.getByRole('button', { name: 'No' }))
+      rerender(drawer(fetchOutput, send, { status: 'blocked', statusEpoch: 2 }))
+      answer({ kind: 'prompt_changed', prompt: fresh })
+      expect(await screen.findByText('The prompt changed, here is the new one')).toBeInTheDocument()
+      finishRefetch(ok('after', false, fresh))
+      await screen.findByText('after')
+      expect(screen.getByText('npm run lint')).toBeInTheDocument()
+      expect(screen.getByText('The prompt changed, here is the new one')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'No' })).toBeEnabled()
     })
 
     it('refetches the output after an unsure outcome', async () => {

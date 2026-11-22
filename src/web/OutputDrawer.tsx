@@ -131,15 +131,16 @@ export function OutputDrawer({
   const message = messageFor(card, current)
   const refreshDisabled = card === null || current?.status === 'closed'
   const loading = current === null || current.generation !== reloads
+  const stale = current === null || current.epoch !== epoch
   const refresh = () => setReloads((count) => count + 1)
 
-  const panel = card !== null && current !== null && current.epoch === epoch && (
+  const panel = card !== null && current !== null && (
     <ReplyPanel
       paneId={paneId}
       name={name}
       prompt={current.prompt}
       status={card.status}
-      disabled={!herdrConnected || loading}
+      disabled={!herdrConnected || loading || stale}
       onSent={refresh}
       onPromptChanged={(prompt) => {
         setState((previous) => (previous === null ? previous : { ...previous, prompt }))
