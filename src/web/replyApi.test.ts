@@ -1,13 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Prompt, ReplyRequest } from '../shared/types'
-import {
-  checkReplyText,
-  forgetReloadOnLoad,
-  parsePrompt,
-  RELOAD_FLAG,
-  sendReply,
-  type ReplyEnv,
-} from './replyApi'
+import { checkReplyText, parsePrompt, RELOAD_FLAG, sendReply, type ReplyEnv } from './replyApi'
 
 const request: ReplyRequest = {
   replyId: 'abcdef12-3456',
@@ -129,7 +122,7 @@ describe('sendReply', () => {
     const e = env(json({ error: 'forbidden' }, 403))
     await expect(sendReply('p1', request, e.value)).resolves.toEqual({ kind: 'reloading' })
     expect(e.reload).toHaveBeenCalledTimes(1)
-    expect(e.store.getItem(RELOAD_FLAG)).not.toBeNull()
+    expect(e.store.getItem(RELOAD_FLAG)).toBe('tok-123')
     await expect(sendReply('p1', request, e.value)).resolves.toEqual({
       kind: 'error',
       message: 'Meerkat refused the request; reload the page and try again',
@@ -137,11 +130,25 @@ describe('sendReply', () => {
     expect(e.reload).toHaveBeenCalledTimes(1)
   })
 
-  it('clears the reload flag after a request that is not refused', async () => {
-    const e = env(json({ sent: 1 }, 200))
-    e.store.setItem(RELOAD_FLAG, '1')
+  it('reloads once more on 403 after the token changed', async () => {
+    const e = env(json({ error: 'forbidden' }, 403))
     await sendReply('p1', request, e.value)
-    expect(e.store.getItem(RELOAD_FLAG)).toBeNull()
+    const renewed: ReplyEnv = { ...e.value, token: () => 'tok-456' }
+    await expect(sendReply('p1', request, renewed)).resolves.toEqual({ kind: 'reloading' })
+    expect(e.reload).toHaveBeenCalledTimes(2)
+    expect(e.store.getItem(RELOAD_FLAG)).toBe('tok-456')
+    await expect(sendReply('p1', request, renewed)).resolves.toEqual({
+      kind: 'error',
+      message: 'Meerkat refused the request; reload the page and try again',
+    })
+    expect(e.reload).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves the reload flag alone after a request that is not refused', async () => {
+    const e = env(json({ sent: 1 }, 200))
+    e.store.setItem(RELOAD_FLAG, 'tok-123')
+    await sendReply('p1', request, e.value)
+    expect(e.store.getItem(RELOAD_FLAG)).toBe('tok-123')
   })
 
   it('shows an error instead of reloading when session storage throws', async () => {
@@ -176,33 +183,6 @@ describe('checkReplyText', () => {
   it('allows a newline only where newlines are allowed', () => {
     expect(checkReplyText('one\ntwo', true)).toBeNull()
     expect(checkReplyText('one\ntwo', false)).toBe("Line breaks can't be sent here")
-  })
-})
-
-describe('forgetReloadOnLoad', () => {
-  it('clears the reload flag when the page carries a token', () => {
-    const e = env(json({}, 200))
-    e.store.setItem(RELOAD_FLAG, '1')
-    forgetReloadOnLoad(e.value)
-    expect(e.store.getItem(RELOAD_FLAG)).toBeNull()
-  })
-
-  it('keeps the flag when the token is empty', () => {
-    const e = env(json({}, 200))
-    e.store.setItem(RELOAD_FLAG, '1')
-    forgetReloadOnLoad({ ...e.value, token: () => '' })
-    expect(e.store.getItem(RELOAD_FLAG)).toBe('1')
-  })
-
-  it('does not throw when session storage throws', () => {
-    const e = env(json({}, 200))
-    const broken: ReplyEnv = {
-      ...e.value,
-      storage: () => {
-        throw new Error('blocked')
-      },
-    }
-    expect(() => forgetReloadOnLoad(broken)).not.toThrow()
   })
 })
 

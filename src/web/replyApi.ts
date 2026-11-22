@@ -135,8 +135,9 @@ function resultFor(status: number, body: unknown): ReplyResult {
 function markReload(env: ReplyEnv): boolean {
   try {
     const storage = env.storage()
-    if (storage.getItem(RELOAD_FLAG) !== null) return false
-    storage.setItem(RELOAD_FLAG, '1')
+    const token = env.token()
+    if (storage.getItem(RELOAD_FLAG) === token) return false
+    storage.setItem(RELOAD_FLAG, token)
     return true
   } catch {
     return false
@@ -147,18 +148,6 @@ function reloadOnce(env: ReplyEnv): ReplyResult {
   if (!markReload(env)) return { kind: 'error', message: REFUSED }
   env.reload()
   return { kind: 'reloading' }
-}
-
-export function forgetReloadOnLoad(env: ReplyEnv = browserEnv()): void {
-  if (env.token() !== '') forgetReload(env)
-}
-
-function forgetReload(env: ReplyEnv): void {
-  try {
-    env.storage().removeItem(RELOAD_FLAG)
-  } catch {
-    return
-  }
 }
 
 export async function sendReply(
@@ -180,6 +169,5 @@ export async function sendReply(
     }
   }
   if (response.status === 403) return reloadOnce(env)
-  forgetReload(env)
   return resultFor(response.status, await readBody(response))
 }
