@@ -201,9 +201,9 @@ test.describe('with progress reads', () => {
       agents.working.pane_id,
       '⏺ Need your OK to proceed.\n─────\n Do you want to proceed?\n ❯ 1. Yes\n   2. No'
     )
-    meerkat.fake.pushStatus(agents.working.pane_id, 'blocked')
-    const attention = column(page, 'Needs attention').getByRole('button', { name: /working-one/ })
-    await expect(attention).toContainText('Need your OK to proceed.')
+    changeStatus(meerkat, agents.working.pane_id, 'blocked')
+    const waiting = column(page, 'Waiting for you').getByRole('button', { name: /working-one/ })
+    await expect(waiting).toContainText('Need your OK to proceed.')
   })
 })
 
