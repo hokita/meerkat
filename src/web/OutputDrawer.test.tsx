@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Card } from '../shared/types'
+import type { Card, Prompt, ReplyRequest } from '../shared/types'
 import { OutputDrawer } from './OutputDrawer'
+import type { ReplyResult } from './replyApi'
 
 function card(overrides: Partial<Card> = {}): Card {
   return {
@@ -27,9 +28,25 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status })
 }
 
-function ok(text: string, truncated = false): Response {
-  return json({ text, truncated })
+function ok(text: string, truncated = false, prompt: Prompt = { kind: 'none' }): Response {
+  return json({ text, truncated, prompt })
 }
+
+const permission: Prompt = {
+  kind: 'permission',
+  fingerprint: 'a'.repeat(64),
+  tool: 'Bash command',
+  request: 'npm test',
+  question: 'Do you want to proceed?',
+  options: [
+    { n: 1, label: 'Yes', description: null, approving: true },
+    { n: 2, label: 'No', description: null, approving: false },
+  ],
+}
+
+const unrecognized: Prompt = { kind: 'unrecognized', fingerprint: 'b'.repeat(64) }
+
+type Send = (paneId: string, request: ReplyRequest) => Promise<ReplyResult>
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -299,5 +316,166 @@ describe('OutputDrawer', () => {
     resolve(ok('late'))
     await new Promise((r) => setTimeout(r, 0))
     expect(errors).not.toHaveBeenCalled()
+  })
+
+  describe('reply panel', () => {
+    function drawer(
+      fetchOutput: (paneId: string) => Promise<Response>,
+      send: Send,
+      overrides: Partial<Card> = { status: 'blocked' },
+      herdrConnected = true
+    ) {
+      return (
+        <OutputDrawer
+          paneId="p1"
+          card={card(overrides)}
+          onClose={vi.fn()}
+          fetchOutput={fetchOutput}
+          herdrConnected={herdrConnected}
+          send={send}
+        />
+      )
+    }
+
+    it('shows the reply panel above the output for a recognized prompt', async () => {
+      const send = vi.fn<Send>()
+      render(drawer(vi.fn().mockResolvedValue(ok('screen', false, permission)), send))
+      const panel = await screen.findByRole('region', { name: 'Reply' })
+      const output = screen.getByText('screen')
+      expect(panel.compareDocumentPosition(output) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(within(panel).getByText('Permission: Bash command')).toBeInTheDocument()
+    })
+
+    it('shows an unrecognized panel below the output it refers to', async () => {
+      render(drawer(vi.fn().mockResolvedValue(ok('screen', false, unrecognized)), vi.fn<Send>()))
+      const panel = await screen.findByRole('region', { name: 'Reply' })
+      const output = screen.getByText('screen')
+      expect(panel.compareDocumentPosition(output) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    })
+
+    it('shows no panel while the card is working', async () => {
+      render(
+        drawer(vi.fn().mockResolvedValue(ok('screen', false, permission)), vi.fn<Send>(), {
+          status: 'working',
+        })
+      )
+      await screen.findByText('screen')
+      expect(screen.queryByRole('region', { name: 'Reply' })).not.toBeInTheDocument()
+    })
+
+    it('shows no panel when the output response has no prompt', async () => {
+      render(
+        drawer(vi.fn().mockResolvedValue(json({ text: 'screen', truncated: false })), vi.fn<Send>())
+      )
+      await screen.findByText('screen')
+      expect(screen.queryByRole('region', { name: 'Reply' })).not.toBeInTheDocument()
+    })
+
+    it('disables the controls when Herdr is disconnected', async () => {
+      render(
+        drawer(
+          vi.fn().mockResolvedValue(ok('screen', false, permission)),
+          vi.fn<Send>(),
+          { status: 'blocked' },
+          false
+        )
+      )
+      const panel = await screen.findByRole('region', { name: 'Reply' })
+      for (const button of within(panel).getAllByRole('button')) expect(button).toBeDisabled()
+    })
+
+    it('refetches the output once after a successful send', async () => {
+      const user = userEvent.setup()
+      const fetchOutput = vi
+        .fn()
+        .mockResolvedValueOnce(ok('before', false, permission))
+        .mockResolvedValueOnce(ok('after'))
+      const send = vi.fn<Send>().mockResolvedValue({ kind: 'sent' })
+      render(drawer(fetchOutput, send))
+      await screen.findByText('before')
+      await user.click(screen.getByRole('button', { name: 'No' }))
+      expect(await screen.findByText('after')).toBeInTheDocument()
+      expect(fetchOutput).toHaveBeenCalledTimes(2)
+      expect(send.mock.calls[0]?.[1].action).toEqual({ type: 'option', n: 2 })
+      expect(screen.queryByRole('region', { name: 'Reply' })).not.toBeInTheDocument()
+    })
+
+    it('swaps in the new prompt on prompt_changed and refreshes the output it belongs to', async () => {
+      const user = userEvent.setup()
+      const fresh: Prompt = { ...permission, fingerprint: 'c'.repeat(64), request: 'npm run lint' }
+      let finishRefresh: (response: Response) => void = () => undefined
+      const fetchOutput = vi
+        .fn()
+        .mockResolvedValueOnce(ok('before', false, permission))
+        .mockReturnValueOnce(new Promise<Response>((resolve) => (finishRefresh = resolve)))
+      const send = vi.fn<Send>().mockResolvedValue({ kind: 'prompt_changed', prompt: fresh })
+      render(drawer(fetchOutput, send))
+      await screen.findByText('before')
+      await user.click(screen.getByRole('button', { name: 'No' }))
+      expect(await screen.findByText('The prompt changed, here is the new one')).toBeInTheDocument()
+      expect(screen.getByText('npm run lint')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'No' })).toBeDisabled()
+      finishRefresh(ok('after', false, fresh))
+      await screen.findByText('after')
+      expect(screen.getByRole('button', { name: 'No' })).toBeEnabled()
+      expect(screen.getByText('The prompt changed, here is the new one')).toBeInTheDocument()
+    })
+
+    it('keeps the panel notice when the prompt moves the panel above the output', async () => {
+      const user = userEvent.setup()
+      const fetchOutput = vi
+        .fn()
+        .mockResolvedValueOnce(ok('before', false, unrecognized))
+        .mockResolvedValueOnce(ok('after', false, permission))
+      const send = vi.fn<Send>().mockResolvedValue({ kind: 'prompt_changed', prompt: permission })
+      render(drawer(fetchOutput, send))
+      await screen.findByText('before')
+      await user.click(screen.getByRole('button', { name: 'Esc' }))
+      await screen.findByText('after')
+      const panel = screen.getByRole('region', { name: 'Reply' })
+      expect(within(panel).getByText('Permission: Bash command')).toBeInTheDocument()
+      expect(within(panel).getByText('The prompt changed, here is the new one')).toBeInTheDocument()
+    })
+
+    it('hides the panel when a refresh fails, so stale output is never answered', async () => {
+      const user = userEvent.setup()
+      const fetchOutput = vi
+        .fn()
+        .mockResolvedValueOnce(ok('before', false, unrecognized))
+        .mockResolvedValueOnce(json({ error: 'herdr_disconnected' }, 503))
+      render(drawer(fetchOutput, vi.fn<Send>()))
+      await screen.findByRole('region', { name: 'Reply' })
+      await user.click(screen.getByRole('button', { name: 'Refresh' }))
+      await screen.findByText('Herdr is not reachable')
+      expect(screen.getByText('before')).toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: 'Reply' })).not.toBeInTheDocument()
+    })
+
+    it('shows no panel once the session closed', async () => {
+      const fetchOutput = vi.fn().mockResolvedValue(ok('screen', false, permission))
+      const send = vi.fn<Send>()
+      const { rerender } = render(drawer(fetchOutput, send))
+      await screen.findByRole('region', { name: 'Reply' })
+      rerender(
+        <OutputDrawer
+          paneId="p1"
+          card={null}
+          onClose={vi.fn()}
+          fetchOutput={fetchOutput}
+          herdrConnected
+          send={send}
+        />
+      )
+      expect(screen.queryByRole('region', { name: 'Reply' })).not.toBeInTheDocument()
+    })
+
+    it('keeps the output a text child when a prompt is shown', async () => {
+      const text = '<b>bold</b>'
+      const { container } = render(
+        drawer(vi.fn().mockResolvedValue(ok(text, false, unrecognized)), vi.fn<Send>())
+      )
+      expect(await screen.findByText(text)).toBeInTheDocument()
+      expect(container.querySelector('b')).toBeNull()
+    })
   })
 })
