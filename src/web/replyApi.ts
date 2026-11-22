@@ -103,6 +103,12 @@ async function readBody(response: Response): Promise<unknown> {
 function herdrResult(body: unknown): ReplyResult {
   const code = String(field(body, 'code') ?? 'unknown')
   const sent = field(body, 'sent')
+  if (field(body, 'uncertain') === true) {
+    return {
+      kind: 'unsure',
+      message: `Meerkat can't tell whether Herdr typed the input (${code}); check the output`,
+    }
+  }
   if (typeof sent === 'number' && sent > 0) {
     return {
       kind: 'unsure',

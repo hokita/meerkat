@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import type { HerdrConnection, Prompt } from '../shared/types.js'
+import { HerdrTimeoutError } from './herdr/client.js'
 import { HerdrProtocolError } from './herdr/protocol.js'
 import type { ReplyKey } from '../shared/types.js'
 import type { ReplySender } from './herdr/reply-sender.js'
@@ -354,13 +355,20 @@ describe('handleReply Herdr errors', () => {
     expect(t.refreshed).toEqual([PANE])
   })
 
-  it('reports other send errors with code unknown', async () => {
-    const t = setup({ failAt: { step: 1, error: new Error('socket closed') } })
+  it.each<[string, Error, string]>([
+    ['a socket close', new Error('socket closed'), 'unknown'],
+    ['a timeout', new HerdrTimeoutError(500), 'unknown'],
+    ['a malformed answer', new HerdrProtocolError('malformed', 'bad'), 'malformed'],
+  ])('reports %s during a send as uncertain', async (_name, error, code) => {
+    const t = setup({ failAt: { step: 1, error } })
     const result = await handleReply(t.deps, PANE, request({ type: 'option', n: 1 }))
     expect(result).toEqual({
       status: 502,
-      body: { error: 'herdr_error', code: 'unknown', sent: 0 },
+      body: { error: 'herdr_error', code, sent: 0, uncertain: true },
     })
+    expect(t.refreshed).toEqual([PANE])
+    expect(t.bookkeeping).toEqual([`sent ${PANE}`])
+    expect(t.replies).toEqual([])
   })
 
   it('reports a failed fresh read as 502 without sending', async () => {

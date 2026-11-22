@@ -102,6 +102,14 @@ describe('sendReply', () => {
     })
   })
 
+  it('reports an uncertain Herdr send as unsure even when no step finished', async () => {
+    const e = env(json({ error: 'herdr_error', code: 'unknown', sent: 0, uncertain: true }, 502))
+    await expect(sendReply('p1', request, e.value)).resolves.toEqual({
+      kind: 'unsure',
+      message: "Meerkat can't tell whether Herdr typed the input (unknown); check the output",
+    })
+  })
+
   it('treats a malformed prompt in prompt_changed as a failure', async () => {
     const e = env(json({ error: 'prompt_changed', prompt: { kind: 'permission' } }, 409))
     await expect(sendReply('p1', request, e.value)).resolves.toEqual({

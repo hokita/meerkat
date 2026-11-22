@@ -147,19 +147,35 @@ function planFor(prompt: Waiting, action: ReplyAction): Plan | null {
   }
 }
 
+function herdrCode(error: unknown): string {
+  return error instanceof HerdrProtocolError ? error.code : 'unknown'
+}
+
 function herdrError(error: unknown, sent: number): ReplyResult {
-  const code = error instanceof HerdrProtocolError ? error.code : 'unknown'
-  return { status: 502, body: { error: 'herdr_error', code, sent } }
+  return { status: 502, body: { error: 'herdr_error', code: herdrCode(error), sent } }
+}
+
+function isHerdrRefusal(error: unknown): boolean {
+  return error instanceof HerdrProtocolError && error.code !== 'malformed'
+}
+
+function sendFailure(error: unknown, sent: number): Outcome {
+  if (isHerdrRefusal(error)) {
+    return { result: herdrError(error, sent), sent, summary: null, uncertain: false }
+  }
+  const body = { error: 'herdr_error', code: herdrCode(error), sent, uncertain: true }
+  return { result: { status: 502, body }, sent, summary: null, uncertain: true }
 }
 
 interface Outcome {
   result: ReplyResult
   sent: number
   summary: string | null
+  uncertain: boolean
 }
 
 function refusal(status: number, body: unknown): Outcome {
-  return { result: { status, body }, sent: 0, summary: null }
+  return { result: { status, body }, sent: 0, summary: null, uncertain: false }
 }
 
 async function answer(
@@ -172,7 +188,7 @@ async function answer(
   try {
     read = await deps.read(paneId)
   } catch (error) {
-    return { result: herdrError(error, 0), sent: 0, summary: null }
+    return { result: herdrError(error, 0), sent: 0, summary: null, uncertain: false }
   }
   if (read === 'gone') return refusal(404, { error: 'session_closed' })
   const { prompt } = read
@@ -187,11 +203,16 @@ async function answer(
     try {
       await step(deps.sender, paneId)
     } catch (error) {
-      return { result: herdrError(error, sent), sent, summary: null }
+      return sendFailure(error, sent)
     }
     sent += 1
   }
-  return { result: { status: 200, body: { sent } }, sent, summary: clip(plan.summary) }
+  return {
+    result: { status: 200, body: { sent } },
+    sent,
+    summary: clip(plan.summary),
+    uncertain: false,
+  }
 }
 
 function bestEffort(task: () => void): void {
@@ -204,9 +225,10 @@ function bestEffort(task: () => void): void {
 
 function afterSend(deps: ReplyDeps, paneId: string, outcome: Outcome): void {
   const { summary } = outcome
-  if (outcome.sent > 0) bestEffort(() => deps.supervisor.markSent(paneId))
+  const mayHaveSent = outcome.sent > 0 || outcome.uncertain
+  if (mayHaveSent) bestEffort(() => deps.supervisor.markSent(paneId))
   if (summary !== null) bestEffort(() => deps.supervisor.recordReply(paneId, summary))
-  if (outcome.sent > 0) bestEffort(() => deps.supervisor.refreshProgress(paneId))
+  if (mayHaveSent) bestEffort(() => deps.supervisor.refreshProgress(paneId))
 }
 
 export async function handleReply(
