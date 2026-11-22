@@ -57,3 +57,6 @@ export type RecognizedPrompt =
   | { kind: 'idle' }
   | { kind: 'unrecognized' }
   | { kind: 'none' }
+
+export type Prompt =
+  (Exclude<RecognizedPrompt, { kind: 'none' }> & { fingerprint: string }) | { kind: 'none' }
