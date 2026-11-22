@@ -1,0 +1,311 @@
+# Reply from the board: design
+
+Date: 2026-11-22. Status: draft for the user's review. Builds on card-progress (`feat/card-progress`).
+Items marked **(my call)** were decided by the designer, not the user. **(builder's call)** items may be
+settled by the builder within the bounds given.
+
+## Intent
+
+The user wants to answer Claude sessions' questions from Meerkat instead of switching to that session's
+terminal. Success: a session lands in Needs attention, the user opens its card, sees exactly what it asks, taps
+an answer (or types one), and the card shows the answer went in, without leaving the board.
+
+## Goals
+
+Three kinds of answer, all decided with the user:
+
+1. **Choice list.** Claude asks with numbered options (AskUserQuestion-style, including "Type something").
+   Meerkat shows one button per option and a text box for the type-your-own option.
+2. **Permission prompt.** "Do you want to proceed? 1. Yes 2. Yes, and don't ask again… 3. No…". Meerkat shows
+   the full tool request (tool name and the whole command or file path) and one button per option. Any
+   approving option needs a second, explicit confirm before it is sent.
+3. **Waiting at the prompt.** The session is idle or done at its `❯` input. Meerkat shows a text box; Send
+   submits the message (e.g. "continue").
+
+Anything not recognized with certainty gets the output (last 40 lines), a text box and a keypad
+(`1`–`9`, `Enter`, `Esc`). Meerkat never guesses which buttons a screen means.
+
+Any session on the board can be answered: the user's own and workers.
+
+## Non-goals
+
+- iPhone or other-device access. Mac only, `127.0.0.1` only, as today.
+- Starting, closing, focusing, renaming, splitting or interrupting anything. No Ctrl+C.
+- Answering non-Claude agents with buttons (they get the keypad fallback only).
+- Multi-select questions and multi-question (tabbed) AskUserQuestion forms get buttons **(my call: no)**; they
+  get the keypad fallback in this version.
+- Notifications, history of replies across restarts, sign-in.
+- Telling the orchestrator through any side channel. It learns from the session's own output.
+
+## Anti-goals (a failure even if it works)
+
+- A web page other than Meerkat's own can make Meerkat send anything to a session.
+- An answer lands on a screen the user did not see (a newer question, another session, another agent in the
+  same pane).
+- A double tap sends an answer twice.
+- "Yes" goes out on a permission prompt without the user having seen the full command and confirmed.
+- Any Herdr method other than the three reply methods below becomes reachable, from any route.
+
+## Approaches (A chosen by the user)
+
+- **A (chosen): recognize and show real buttons.** Meerkat parses Claude Code's choice list and permission
+  prompt from the screen, shows labelled buttons and the full request, confirms approvals, and falls back to a
+  keypad plus text box for everything else. Costs a parser that must track Claude Code's UI; fails safe.
+- **B: keypad and text only.** No parsing; the user reads the output and taps `1`, `Enter`, etc. Smaller, but
+  approving a command means reading raw terminal text and there is no confirm tied to what was approved.
+
+A is B plus recognition on top, so B is exactly A's fallback path.
+
+## Screen formats and recognition rules
+
+Input: `agent.read` (`recent_unwrapped`, text, ANSI stripped), sanitized as today, **120 lines** for
+recognition **(my call: long commands overflow 40)**; the drawer still shows the last 40.
+
+Evidence. Herdr 0.9.5's own Claude detection rules (`herdr agent explain <pane> --json`, read-only) classify
+`blocked` by these strings in the region after the last horizontal rule: `do you want to proceed?` with
+`esc to cancel` (permission), and the footer
+`Enter to select · ↑/↓ to navigate · Esc to cancel` (also `Enter to confirm · Esc to cancel`, and
+`arrow keys`/`↑↓` variants) for forms. The idle prompt box (observed live) is:
+
+```
+✽ Spinner… (39s · ↓ 2.4k tokens)
+
+──────────────────────────────────────────────
+❯
+──────────────────────────────────────────────
+  ⏵⏵ auto mode on · … · esc to interrupt · …
+```
+
+No live session was showing a dialog while this was written, so the two dialog samples below are the shapes
+Claude Code renders, written from its UI and Herdr's rules. The builder's first task is to capture real
+fixtures (see Left to the builder) and adjust the parser to them, not the other way round.
+
+Permission prompt:
+
+```
+──────────────────────────────────────────────
+ Bash command
+
+   npm test -- --run src/server
+   Run the server unit tests
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for npm test commands in /path/to/repo
+   3. No, and tell Claude what to do differently (esc)
+
+ Esc to cancel
+```
+
+Choice list (single question):
+
+```
+──────────────────────────────────────────────
+ ☐ Scope
+
+ Which branch should the fix go on?
+
+ ❯ 1. feat/reply
+      Keep it with the reply work
+   2. main
+      Hotfix straight to main
+   3. Type something.
+
+ Enter to select · ↑/↓ to navigate · Esc to cancel
+```
+
+Rules. Take the block after the **last** horizontal rule (`─{3,}` line). A screen is recognized only if
+**all** hold; any miss gives `unrecognized`:
+
+1. Herdr's status for the pane is `blocked` (from the board), and the agent is `claude`.
+2. The block ends with a known footer (exact text, case-insensitive, whitespace-normalized): for a
+   permission prompt a bare `Esc to cancel` line; for a choice list one of the form footers above.
+3. Options are lines `^\s*(❯\s+)?(\d+)\.\s+(.+)$`, numbered `1..n` with no gaps, `n ≤ 9`, exactly one with the
+   `❯` marker. Indented lines directly under an option are its description.
+4. **Permission** if the line just above the options is `Do you want to proceed?` or another
+   `Do you want to …?` question (edits/creates: `Do you want to make this edit to <file>?`). The request is
+   every line between the rule and that question: first non-blank line is the tool title (`Bash command`,
+   `Edit file`, …), the rest is shown verbatim in a `<pre>`. If the request is empty, `unrecognized`.
+5. **Choice** if a `☐ <header>` or no header is followed by a question line ending in `?`, then options. The
+   type-your-own option is the last option whose label is `Type something.` (or the builder's captured
+   equivalent). A `☒`/`✔` tab strip, `[ ]` checkboxes, or a `Submit` option means multi-question or
+   multi-select: `unrecognized`.
+6. **Idle prompt** if Herdr's status is `idle` or `done` and the block after the second-to-last rule is a
+   prompt box whose line starts with `❯` (empty or with the user's half-typed draft). A non-empty draft means
+   `unrecognized` **(my call: Meerkat must not append to text the user typed in the terminal)**.
+7. Approving options: any permission option whose label starts with `Yes`, **and any label Meerkat doesn't
+   know** (fail safe). Only labels starting with `No` skip the confirm.
+
+The parser is a pure function `recognize(text, status, agent) → Prompt` with tests built from the fixtures.
+
+## Herdr input methods (verified 2026-11-22, herdr 0.9.5, `herdr api schema --json`)
+
+- `agent.prompt` `{target, text, wait?}`: bracketed paste + Enter as one submission. **Rejects** a blocked
+  agent with `agent_blocked` before sending. Used for the idle prompt only; no `wait`.
+- `agent.send_keys` `{target, keys: string[]}`: logical key names (`esc`, `ctrl+c` are documented); Herdr
+  validates every key before writing. Used for options and the keypad.
+- `pane.send_text` `{pane_id, text}`: literal text, no Enter. The only way to type into a dialog (the
+  type-your-own field, or the text box on an unrecognized screen) because `agent.prompt` refuses blocked
+  agents. Followed by `agent.send_keys ["enter"]` only when the user taps Send.
+
+There is no `agent.send_text`. Not used: `pane.send_keys`, `pane.send_input`, `pane.run`, and everything else.
+
+## Allow-list change
+
+- `ALLOWED_METHODS` becomes `READ_METHODS` (the same 6). A new `REPLY_METHODS` holds exactly
+  `agent.prompt`, `agent.send_keys`, `pane.send_text`.
+- `HerdrClient.request` keeps checking `READ_METHODS` only, so no existing route can send input.
+- A separate `ReplySender` (new module) has one typed function per method; it checks `REPLY_METHODS`, builds
+  the params itself (no pass-through objects) and is constructed only in `main.ts` and handed only to the reply
+  route. Keys are checked against a closed list `1`–`9`, `enter`, `esc` **(my call: also `up`/`down` only if
+  the builder finds digits don't select in Claude Code)**.
+- Tests: every one of the 109 schema methods is tried on both paths; exactly 6 pass `request`, exactly 3 pass
+  `ReplySender`, none pass both. `server.stop`, `pane.close`, `agent.start`, `pane.run`, `pane.send_keys`,
+  `pane.send_input`, `agent.focus`, … are named explicitly. e2e: the fake Herdr records every method; a test
+  drives each reply kind and asserts only these 9 methods were ever received.
+
+## API
+
+- `GET /api/sessions/:paneId/output` gains a `prompt` field (one read serves both):
+  `{kind: 'permission', fingerprint, tool, request, question, options: [{n, label, description, approving}]}`,
+  `{kind: 'choice', fingerprint, header?, question, options, freeTextOption?}`,
+  `{kind: 'idle', fingerprint}`, `{kind: 'unrecognized', fingerprint}`, or `{kind: 'none'}` while working.
+- `POST /api/sessions/:paneId/reply`, JSON body ≤ 8 KB:
+  `{replyId, fingerprint, action}` where `action` is `{type: 'option', n}`, `{type: 'freeText', text}` (choice
+  type-your-own: select that option's number, `pane.send_text`, then `enter`), `{type: 'prompt', text}`
+  (idle), `{type: 'keys', keys}` or `{type: 'text', text}` (fallback; text is sent without Enter).
+- Text: 1–4000 chars after trimming; no control characters; newlines allowed only for `prompt`
+  **(my call: a newline typed into a dialog may submit it early)**.
+- Responses: `200 {sent}`; `409 {error: 'prompt_changed', prompt}` with the fresh prompt;
+  `409 {error: 'not_waiting'}` (status is `working`); `400` bad body or action not valid for the prompt kind
+  (e.g. `option 4` of 3); `403` token/Origin/header failure; `404 session_closed`; `503 herdr_unreachable`;
+  `502 herdr_error` (with Herdr's code, e.g. `agent_blocked`); `415` non-JSON.
+- The server accepts `POST` on this route only; every other non-GET still gets `405`.
+
+## Security model
+
+Threat: another site open in the same browser forging a POST to `127.0.0.1:4321`, or framing Meerkat to trick a
+tap (clickjacking).
+
+1. **Per-launch secret.** At start the server makes 32 random bytes (`crypto.randomBytes`) and writes them into
+   the served `index.html` as `<meta name="meerkat-token">`. The page sends it as `X-Meerkat-Token`. The server
+   compares with `timingSafeEqual`. Never logged, never in a URL, new on every restart (the page reloads to get
+   it after a 403).
+2. **Why a cross-origin page can't send it.** It can't read the token: `index.html` has no CORS headers, so
+   `fetch` from another origin gets an opaque response, and DNS rebinding is stopped by the existing Host check
+   (421). And it can't send the header: a custom header or `Content-Type: application/json` makes the request
+   non-simple, so the browser sends an `OPTIONS` preflight first; Meerkat answers it with `405` and no
+   `Access-Control-Allow-*`, so the browser never sends the POST. HTML forms can't set custom headers at all.
+3. **Origin check as a second lock.** The POST must carry `Origin: http://localhost:<port>` or
+   `http://127.0.0.1:<port>` matching the Host, and `Sec-Fetch-Site: same-origin` when present. Missing
+   Origin is refused.
+4. **No framing.** Every HTML response gets `Content-Security-Policy: frame-ancestors 'none'` and
+   `X-Frame-Options: DENY`, so no page can overlay Meerkat's Yes button.
+5. **Local processes** can call the endpoint with the token only if they can read the page, which they can, but
+   any local process can already talk to Herdr's socket directly, so this adds no new reach.
+
+Tests: missing/wrong token 403; foreign or missing Origin 403; `OPTIONS` gets 405 with no CORS headers; form
+content types 415; the frame headers on `/`; the token differs between two server instances.
+
+## Race safety and idempotency
+
+- **Fingerprint.** `sha256` over `paneId`, the agent's `terminal_id` (from the snapshot, so another agent in the
+  same pane changes it), the card's **status epoch**, the prompt kind, and the normalized prompt block (rule to
+  footer, excluding spinner, timer and status-bar lines). For `unrecognized`, the last 40 sanitized lines
+  without those volatile lines.
+- **Status epoch (my call).** The board keeps a per-pane counter that goes up on every status change Meerkat
+  sees. A session that works and comes back to idle, or asks the same `npm test` permission twice, gets a new
+  epoch, so an answer meant for the earlier screen is refused even when the text looks identical. The epoch
+  goes to the browser on the card and in the `prompt` field.
+- **Re-check before sending.** The reply route takes a per-pane lock, re-reads the pane, recognizes again,
+  recomputes the fingerprint, and sends only if it equals the one in the request and the action fits the
+  fresh prompt. Otherwise `409 prompt_changed` and the UI swaps in the new prompt. For `prompt` (idle) the
+  status must also still be `idle` or `done`; `agent.prompt` itself refuses `blocked`.
+- **Right session.** Target is the pane id from the URL, validated by the existing regex and matched against a
+  card on the board with the same `terminal_id`. `agent.*` calls use the pane id as target.
+- **Double taps.** `replyId` is a client UUID. The server remembers results for the last 5 minutes per pane
+  and returns the stored result for a repeated id without sending. A different id on the same screen fails the
+  fingerprint once the first answer changed the screen. The UI disables buttons while a request is in flight.
+- Multi-step sends (`freeText`: number, text, enter) stop at the first error and report how far they got.
+
+## Visibility after answering
+
+- The card gets `lastReply: {summary, at}` (e.g. `You answered "Yes" from Meerkat · 8s ago`), kept in memory
+  until the session's next reply-able prompt or 10 minutes **(builder's call within 5–15)**. Summaries never
+  include free text beyond 80 chars.
+- After a send, the pane is re-read at once so card-progress's sentence updates without waiting for the 10 s
+  tick. The orchestrator sees the answer in the session output (Claude echoes the choice / the `❯` message),
+  and the card shows it was answered from Meerkat.
+
+## UI sketch
+
+```
+┌ Needs attention ─────────────┐   drawer (existing) ───────────────────────────
+│ meerkat-audit   blocked 2m   │   meerkat-audit · blocked
+│ "Plan ready, which branch?"  │   ┌ Permission: Bash command ────────────────┐
+│ [Reply]                      │   │ npm test -- --run src/server              │
+└──────────────────────────────┘   │ Run the server unit tests                 │
+                                   └───────────────────────────────────────────┘
+                                   Do you want to proceed?
+                                   [Yes…] [Yes, and don't ask again…] [No…]
+                                   ── after [Yes…] ─────────────────────────────
+                                   Send "Yes" to meerkat-audit? It will run the
+                                   command above.          [Cancel] [Send Yes]
+                                   ── output (last 40 lines) ▾ ────────────────
+```
+
+- Choice: question, one button per option with its description; the type-your-own option opens a text box with
+  Send. Idle: text box + Send (`⌘↩`). Unrecognized: output, text box (sends without Enter), keypad
+  `1 2 3 4 5 6 7 8 9 Enter Esc`, and a line "Meerkat couldn't read this prompt; check the output first."
+- **Keypad confirm (my call).** On an unrecognized screen whose status is `blocked`, every digit and `Enter`
+  goes through the confirm panel ("This screen may be asking for permission; check the output above"),
+  because it could be a permission prompt Meerkat failed to read. `Esc` and typed text don't need it.
+- **Draft typed in the terminal (my call).** When an idle prompt box holds a draft, the text box and `Enter`
+  are hidden (only the output and `Esc` show), so Meerkat never appends to or submits text it didn't write.
+- Free text starting with `!` or `/` is sent as typed (it is the user's own command); the Send button reads
+  "Send as command" so it isn't a surprise **(my call)**.
+- Confirm is an in-page panel, never `window.confirm`. Focus starts on Cancel. Errors show inline (`The prompt
+  changed, here is the new one`).
+- `Reply` shows on cards whose status is `blocked`, `idle` or `done`. Working sessions show no reply controls.
+
+## Failure modes
+
+| Case | Behaviour |
+|---|---|
+| Prompt changed / answered in the terminal | 409, new prompt shown, nothing sent |
+| Session closed between read and tap | 404, drawer says "Session closed" (existing) |
+| Herdr down | 503, reply controls disabled with the disconnected banner |
+| Herdr rejects keys or `agent_blocked` | 502 with Herdr's code shown; nothing retried |
+| Claude Code UI changes format | screens fall to `unrecognized` → keypad; parser tests fail on new fixtures |
+| Meerkat restarted (new token) | 403 → page reloads once to pick up the new token |
+| Status says idle but the screen shows a spinner (seen live) | recognizer sees no empty prompt box → `unrecognized` |
+
+## Test strategy (red/green, no new dependencies)
+
+- Unit: `recognize` against captured fixtures (each kind, long commands, near-misses: prose numbered lists,
+  missing footer, gaps in numbering, two `❯`, multi-select, tabbed form, draft text in the prompt box);
+  fingerprint stability (spinner/timer changes don't change it; option or command changes do); allow-list
+  split; `ReplySender` param building and key vocabulary; token/Origin/preflight/frame headers; reply route
+  (each status code, lock, replay of `replyId`, fresh read before send).
+- Component: each panel, confirm flow (Yes never sent without confirm; Cancel sends nothing), disabled
+  while in flight, 409 swap, `lastReply` on the card.
+- e2e (fake Herdr): extend the fake to serve the three input methods, record them, and change the screen after
+  a send; scenarios per kind, double-click sends once, changed-prompt 409, cross-origin page on a second test
+  port cannot trigger a send, and the 9-method assertion.
+
+## Left to the builder
+
+- **Capture real fixtures first.** No dialog was on screen during design. With the user's go-ahead, get one
+  permission prompt, one single-question choice list (with descriptions and Type something), a multi-select,
+  and a tabbed form from a scratch session the user starts, via read-only `agent.read`; strip any session
+  content; check each with `herdr agent explain --file <fixture> --agent claude` reads as `blocked`.
+- **Verify key behaviour in that scratch session, with the user present:** whether a digit alone selects and
+  submits in both dialog kinds, the exact key names Herdr accepts (`enter`, digits), and whether
+  `pane.send_text` into the type-your-own field needs bracketed paste. Never against a real work session.
+- Exact CSS, copy, the `lastReply` duration within 5–15 min, the 120-line read size if fixtures need more.
+- **Order.** Card-progress (`feat/card-progress`, design and plan only so far) is built and merged first by its
+  own worker; this work rebases on it and reuses its reader for the after-send re-read and the 120-line read.
+  The plan does not build card-progress.
+- **Gate after fixtures.** Fixture capture and the key checks are a first phase. If they change any
+  recognition rule above or a send sequence, the builder writes the change into this doc and stops for the
+  user's approval before building the parser and the sender.
