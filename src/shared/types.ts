@@ -37,3 +37,23 @@ export interface BoardView {
 }
 
 export type HerdrConnection = 'connecting' | 'connected' | 'disconnected'
+
+export interface PromptOption {
+  n: number
+  label: string
+  description: string | null
+  approving: boolean
+}
+
+export type RecognizedPrompt =
+  | { kind: 'permission'; tool: string; request: string; question: string; options: PromptOption[] }
+  | {
+      kind: 'choice'
+      header: string | null
+      question: string
+      options: PromptOption[]
+      freeTextOption: number | null
+    }
+  | { kind: 'idle' }
+  | { kind: 'unrecognized' }
+  | { kind: 'none' }
