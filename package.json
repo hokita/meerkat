@@ -14,7 +14,8 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json && tsc -p tsconfig.test.json",
     "test:e2e": "npm run build && playwright test -c e2e/playwright.config.ts",
-    "check:node-pins": "scripts/check-node-pins.sh"
+    "check:node-pins": "scripts/check-node-pins.sh",
+    "check:action-pins": "scripts/check-action-pins.sh"
   },
   "dependencies": {
     "react": "19.3.1",
