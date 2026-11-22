@@ -1,6 +1,6 @@
 import type { HerdrClient } from './herdr/client.js'
-import { parseReadResponse } from './herdr/protocol.js'
 import { sanitizeOutput } from './output.js'
+import { readScreen } from './read-screen.js'
 
 export const MAX_PROGRESS_CHARS = 280
 
@@ -74,7 +74,11 @@ function readBlock(lines: string[], start: number): Block {
   }
 }
 
-export function extractProgress(text: string): string | null {
+export interface ExtractOptions {
+  markerOnly?: boolean
+}
+
+export function extractProgress(text: string, opts: ExtractOptions = {}): string | null {
   const lines = text.split('\n').map(normalizeLine)
   const blocks: Block[] = []
   lines.forEach((line, index) => {
@@ -84,19 +88,15 @@ export function extractProgress(text: string): string | null {
     const last = blocks.findLast((block) => !block.isToolCall && block.text !== '')
     return last ? cap(last.text) : null
   }
+  if (opts.markerOnly === true) return null
   const fallback = lines.findLast((line) => line.trim() !== '' && !isChrome(line))
   return fallback === undefined ? null : cap(collapse(fallback))
 }
 
 export async function readProgress(client: HerdrClient, paneId: string): Promise<string | null> {
-  const line = await client.request('agent.read', {
-    target: paneId,
-    source: 'recent_unwrapped',
-    lines: 120,
-    format: 'text',
-    strip_ansi: true,
-  })
-  const read = parseReadResponse(line)
+  const read = await readScreen(client, paneId)
   if (read.kind === 'gone') return null
-  return extractProgress(sanitizeOutput(read.text).text)
+  return extractProgress(sanitizeOutput(read.text).text, {
+    markerOnly: read.source === 'visible',
+  })
 }

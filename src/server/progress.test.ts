@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { fakeSnapshot, startFakeHerdr, type FakeHerdr } from '../../test-support/fake-herdr.js'
-import { createHerdrClient } from './herdr/client.js'
+import { createHerdrClient, type HerdrClient } from './herdr/client.js'
+import { HerdrProtocolError } from './herdr/protocol.js'
 import { extractProgress, readProgress } from './progress.js'
 
 const NBSP = '\u00a0'
@@ -122,6 +123,11 @@ describe('extractProgress', () => {
     expect(extractProgress('npm output\n⏺')).toBeNull()
     expect(extractProgress('⏺ Done.\n\n⏺')).toBe('Done.')
   })
+
+  it('skips the line fallback when only marker blocks count', () => {
+    expect(extractProgress('plain line', { markerOnly: true })).toBeNull()
+    expect(extractProgress('⏺ Done.\nEnter to select', { markerOnly: true })).toBe('Done.')
+  })
 })
 
 describe('readProgress', () => {
@@ -151,6 +157,57 @@ describe('readProgress', () => {
         strip_ansi: true,
       },
     })
+  })
+
+  it('reads the latest sentence of a busy pane shorter than the requested lines', async () => {
+    const fake = await startFake({ 'w1:p1': '⏺ Waiting on your answer.' })
+    fake.setBusyViewport('w1:p1', 28)
+    const client = createHerdrClient({ socketPath: fake.socketPath })
+    expect(await readProgress(client, 'w1:p1')).toBe('Waiting on your answer.')
+  })
+
+  it('returns null when the visible screen has no ⏺ block', async () => {
+    const fake = await startFake({
+      'w1:p1': [
+        'Which color do you pick?',
+        '❯ 1. Red',
+        '  2. Blue',
+        'Enter to select · ↑/↓ to navigate · Esc to cancel',
+      ].join('\n'),
+    })
+    fake.setBusyViewport('w1:p1', 28)
+    const client = createHerdrClient({ socketPath: fake.socketPath })
+    expect(await readProgress(client, 'w1:p1')).toBeNull()
+  })
+
+  it('keeps the line fallback for idle panes', async () => {
+    const fake = await startFake({ 'w1:p1': 'npm test\nall 12 passed' })
+    const client = createHerdrClient({ socketPath: fake.socketPath })
+    expect(await readProgress(client, 'w1:p1')).toBe('all 12 passed')
+  })
+
+  it('throws when the visible retry fails too', async () => {
+    const fake = await startFake({ 'w1:p1': '⏺ Waiting on your answer.' })
+    fake.setBusyViewport('w1:p1', 28)
+    fake.setVisibleReadError('w1:p1', { code: 'agent_not_idle', message: 'x' })
+    const client = createHerdrClient({ socketPath: fake.socketPath })
+    await expect(readProgress(client, 'w1:p1')).rejects.toMatchObject({ code: 'agent_not_idle' })
+    expect(fake.received.filter((r) => r.method === 'agent.read')).toHaveLength(2)
+  })
+
+  it('throws on other errors without retrying', async () => {
+    let calls = 0
+    const client: HerdrClient = {
+      request() {
+        calls += 1
+        return Promise.reject(new HerdrProtocolError('internal', 'x'))
+      },
+      subscribe() {
+        throw new Error('unused')
+      },
+    }
+    await expect(readProgress(client, 'w1:p1')).rejects.toMatchObject({ code: 'internal' })
+    expect(calls).toBe(1)
   })
 
   it('returns null for a closed pane', async () => {

@@ -18,6 +18,7 @@ export interface FakeHerdr {
   setSnapshot(snapshot: unknown): void
   setRead(paneId: string, text: string | null): void
   setBusyViewport(paneId: string, rows: number | null): void
+  setVisibleReadError(paneId: string, error: { code: string; message: string } | null): void
   setSnapshotDelay(ms: number): void
   setSubscribeError(error: { code: string; message: string } | null): void
   setReplyError(error: { code: string; message: string } | null): void
@@ -158,6 +159,7 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
   let inputHandler: ((request: ReceivedRequest) => void) | null = null
   const reads = new Map<string, string>(Object.entries(options.reads ?? {}))
   const busyViewports = new Map<string, number>()
+  const visibleReadErrors = new Map<string, { code: string; message: string }>()
   const connections = new Set<net.Socket>()
   const subscribers = new Set<net.Socket>()
   const dir = await mkdtemp(join(tmpdir(), 'mk-'))
@@ -190,6 +192,10 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
     setBusyViewport(paneId, rows) {
       if (rows === null) busyViewports.delete(paneId)
       else busyViewports.set(paneId, rows)
+    },
+    setVisibleReadError(paneId, error) {
+      if (error === null) visibleReadErrors.delete(paneId)
+      else visibleReadErrors.set(paneId, error)
     },
     setRead(paneId, text) {
       if (text === null) reads.delete(paneId)
@@ -246,6 +252,11 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
       const rows = busyViewports.get(target)
       const lines = isObject(params) ? params['lines'] : undefined
       const source = isObject(params) ? params['source'] : undefined
+      const visibleError = visibleReadErrors.get(target)
+      if (source === 'visible' && visibleError !== undefined) {
+        socket.end(`${JSON.stringify({ id, error: visibleError })}\n`)
+        return
+      }
       if (
         rows !== undefined &&
         source !== 'visible' &&
