@@ -1,6 +1,7 @@
 # Reply from the board: design
 
-Date: 2026-11-22. Status: draft for the user's review. Builds on card-progress (`feat/card-progress`).
+Date: 2026-11-22. Status: approved by the user on 2026-11-22. Builds on card-progress (merged to main as
+`7b3e76b`).
 Items marked **(my call)** were decided by the designer, not the user. **(builder's call)** items may be
 settled by the builder within the bounds given.
 
@@ -266,7 +267,9 @@ content types 415; the frame headers on `/`; the token differs between two serve
   "Send as command" so it isn't a surprise **(my call)**.
 - Confirm is an in-page panel, never `window.confirm`. Focus starts on Cancel. Errors show inline (`The prompt
   changed, here is the new one`).
-- `Reply` shows on cards whose status is `blocked`, `idle` or `done`. Working sessions show no reply controls.
+- Cards whose status is `blocked`, `idle` or `done` show a `Reply` label; the card is already a button that
+  opens the drawer, so the reply panel lives in the drawer above the output **(my call: no nested button)**.
+  Working sessions show no reply controls.
 
 ## Failure modes
 
@@ -295,17 +298,25 @@ content types 415; the frame headers on `/`; the token differs between two serve
 
 ## Left to the builder
 
-- **Capture real fixtures first.** No dialog was on screen during design. With the user's go-ahead, get one
-  permission prompt, one single-question choice list (with descriptions and Type something), a multi-select,
-  and a tabbed form from a scratch session the user starts, via read-only `agent.read`; strip any session
-  content; check each with `herdr agent explain --file <fixture> --agent claude` reads as `blocked`.
-- **Verify key behaviour in that scratch session, with the user present:** whether a digit alone selects and
-  submits in both dialog kinds, the exact key names Herdr accepts (`enter`, digits), and whether
-  `pane.send_text` into the type-your-own field needs bracketed paste. Never against a real work session.
+- **Capture real fixtures first.** No dialog was on screen during design. Get one permission prompt, one
+  single-question choice list (with descriptions and Type something), a multi-select, and a tabbed form from
+  the scratch session below, via `agent.read`; strip any session content; check each with
+  `herdr agent explain --file <fixture> --agent claude` reads as `blocked`.
+- **Verify key behaviour in the scratch session:** whether a digit alone selects and submits in both dialog
+  kinds, the exact key names Herdr accepts (`enter`, digits), and whether `pane.send_text` into the
+  type-your-own field needs bracketed paste.
+
+## User's answers to the builder check (2026-11-22)
+
+1. **Key tests.** The builder may start **one** throwaway Claude session of its own (`herdr agent start` in a
+   new workspace whose cwd is an empty temp folder it creates), trigger dialogs there, and send test input
+   **only to that session**. Never to any other session. Close it when done and report its id.
+2. **When real screens differ from this doc.** The builder may adjust recognition rules on its own as long as
+   everything still falls back safely. If **what gets sent** (key or text sequences) or **the confirm rules**
+   change, the builder stops and tells the user before building on it.
 - Exact CSS, copy, the `lastReply` duration within 5–15 min, the 120-line read size if fixtures need more.
-- **Order.** Card-progress (`feat/card-progress`, design and plan only so far) is built and merged first by its
-  own worker; this work rebases on it and reuses its reader for the after-send re-read and the 120-line read.
-  The plan does not build card-progress.
-- **Gate after fixtures.** Fixture capture and the key checks are a first phase. If they change any
-  recognition rule above or a send sequence, the builder writes the change into this doc and stops for the
-  user's approval before building the parser and the sender.
+- **Order.** Card-progress is merged (`7b3e76b`); this branch is rebased on it and reuses its 120-line reader
+  and poller for the after-send re-read.
+- **Gate after fixtures.** Fixture capture and the key checks are a first phase. Recognition-rule changes
+  that still fail safe are written into this doc and the build goes on. A change to a send sequence or to the
+  confirm rules stops the build for the user (answer 2 above).
