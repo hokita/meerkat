@@ -9,8 +9,13 @@ bad=0
 check() {
   local label="$1" want="$2" pattern="$3" good="$4"
   shift 4
-  local lines count=0
-  lines="$(grep -nHE "$pattern" "$@" || true)"
+  local lines count=0 status=0
+  lines="$(grep -nHE "$pattern" "$@")" || status=$?
+  if [ "$status" -gt 1 ]; then
+    echo "could not read files for $label"
+    bad=1
+    return
+  fi
   while IFS= read -r line; do
     [ -z "$line" ] && continue
     count=$((count + 1))
@@ -25,8 +30,11 @@ check() {
   fi
 }
 
+shopt -s nullglob
+workflows=(.github/workflows/*.yml .github/workflows/*.yaml)
+
 v="${expected//./\\.}"
-check "setup-node node-version" 5 'node-version:' "node-version: '${v}'$" .github/workflows/*.yml
+check "setup-node node-version" 5 'node-version:' "node-version: '${v}'$" "${workflows[@]}"
 check "Volta node" 1 '"node":' "\"node\": \"${v}\"$" package.json
 
 if [ "$bad" -ne 0 ]; then
