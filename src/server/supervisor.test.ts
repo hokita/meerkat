@@ -489,6 +489,26 @@ describe('supervisor', () => {
     await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(2))
   })
 
+  it('records a reply on the card, publishes it and expires it on the reconcile tick', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    let clock = 1000
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), {
+      reconcileMs: 50,
+      now: () => clock,
+    })
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')).toBeDefined())
+    expect(supervisor.card('nope')).toBeUndefined()
+    const published: unknown[] = []
+    supervisor.onChange((state) => published.push(state))
+    supervisor.recordReply('wJ:p1', 'Yes')
+    expect(supervisor.card('wJ:p1')?.lastReply).toEqual({ summary: 'Yes', at: 1000, epoch: 0 })
+    expect(cardOf(supervisor, 'wJ:p1')?.lastReply?.summary).toBe('Yes')
+    expect(published).toHaveLength(1)
+    clock = 1000 + 600_000
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')?.lastReply).toBeNull())
+  })
+
   it('stop closes the subscription and makes no further requests', async () => {
     const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'working' })])
     fake.setRead('wJ:p1', '⏺ Halfway there.')

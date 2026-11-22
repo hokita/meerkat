@@ -8,6 +8,12 @@ export interface Progress {
   sinceIsLowerBound: boolean
 }
 
+export interface LastReply {
+  summary: string
+  at: number
+  epoch: number
+}
+
 export interface Card {
   paneId: string
   workspaceId: string
@@ -18,6 +24,10 @@ export interface Card {
   since: number
   sinceIsLowerBound: boolean
   progress: Progress | null
+  agent: string | null
+  terminalId: string | null
+  statusEpoch: number
+  lastReply: LastReply | null
 }
 
 export interface BoardView {

@@ -7,6 +7,7 @@ export interface BoardState {
 
 const UNKNOWN_REPO = '(unknown)'
 const UNNAMED = '(unnamed)'
+export const REPLY_VISIBLE_MS = 600_000
 
 export function columnOf(status: AgentStatus): Column {
   if (status === 'done' || status === 'blocked') return 'attention'
@@ -30,6 +31,15 @@ export function repoName(
   return segments[segments.length - 1] ?? UNKNOWN_REPO
 }
 
+function supersedesReply(card: Card): boolean {
+  if (card.lastReply === null || card.statusEpoch <= card.lastReply.epoch) return false
+  return card.status === 'blocked' || card.status === 'idle' || card.status === 'done'
+}
+
+function withoutSupersededReply(card: Card): Card {
+  return supersedesReply(card) ? { ...card, lastReply: null } : card
+}
+
 export function boardFromSnapshot(
   prev: BoardState | null,
   snap: HerdrSnapshot,
@@ -41,7 +51,7 @@ export function boardFromSnapshot(
   for (const agent of snap.agents) {
     const previous = prev?.cards.get(agent.paneId)
     const unchanged = previous !== undefined && previous.status === agent.status
-    cards.set(agent.paneId, {
+    const card: Card = {
       paneId: agent.paneId,
       workspaceId: agent.workspaceId,
       name: agent.name,
@@ -51,7 +61,12 @@ export function boardFromSnapshot(
       since: unchanged ? previous.since : now,
       sinceIsLowerBound: unchanged ? previous.sinceIsLowerBound : true,
       progress: previous?.progress ?? null,
-    })
+      agent: agent.agent,
+      terminalId: agent.terminalId,
+      statusEpoch: previous === undefined ? 0 : previous.statusEpoch + (unchanged ? 0 : 1),
+      lastReply: previous?.lastReply ?? null,
+    }
+    cards.set(agent.paneId, withoutSupersededReply(card))
   }
   return { cards }
 }
@@ -70,7 +85,14 @@ export function applyStatusEvent(
   cards.set(
     ev.paneId,
     statusChanged
-      ? { ...card, title, status: ev.status, since: now, sinceIsLowerBound: false }
+      ? withoutSupersededReply({
+          ...card,
+          title,
+          status: ev.status,
+          since: now,
+          sinceIsLowerBound: false,
+          statusEpoch: card.statusEpoch + 1,
+        })
       : { ...card, title }
   )
   return { cards }
@@ -89,6 +111,29 @@ export function applyProgress(
     ...card,
     progress: { text, since: now, sinceIsLowerBound: card.progress === null },
   })
+  return { cards }
+}
+
+export function applyReply(
+  state: BoardState,
+  paneId: string,
+  summary: string,
+  now: number
+): BoardState {
+  const card = state.cards.get(paneId)
+  if (card === undefined) return state
+  const cards = new Map(state.cards)
+  cards.set(paneId, { ...card, lastReply: { summary, at: now, epoch: card.statusEpoch } })
+  return { cards }
+}
+
+export function expireReplies(state: BoardState, now: number): BoardState {
+  const expired = [...state.cards.values()].filter(
+    (card) => card.lastReply !== null && now - card.lastReply.at >= REPLY_VISIBLE_MS
+  )
+  if (expired.length === 0) return state
+  const cards = new Map(state.cards)
+  for (const card of expired) cards.set(card.paneId, { ...card, lastReply: null })
   return { cards }
 }
 

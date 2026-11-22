@@ -15,6 +15,10 @@ function card(overrides: Partial<Card> = {}): Card {
     since: 0,
     sinceIsLowerBound: false,
     progress: null,
+    agent: 'claude',
+    terminalId: 't1',
+    statusEpoch: 0,
+    lastReply: null,
     ...overrides,
   }
 }

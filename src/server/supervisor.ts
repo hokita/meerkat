@@ -1,8 +1,10 @@
-import type { AgentStatus, BoardView, HerdrConnection } from '../shared/types.js'
+import type { AgentStatus, BoardView, Card, HerdrConnection } from '../shared/types.js'
 import {
   applyProgress,
+  applyReply,
   applyStatusEvent,
   boardFromSnapshot,
+  expireReplies,
   toView,
   type BoardState,
 } from './board.js'
@@ -25,6 +27,8 @@ export interface Supervisor {
   start(): void
   stop(): Promise<void>
   current(): SupervisorState
+  card(paneId: string): Card | undefined
+  recordReply(paneId: string, summary: string): void
   onChange(listener: (state: SupervisorState) => void): () => void
 }
 
@@ -215,6 +219,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
     herdr = 'connected'
     outageLogged = false
     armReconcile()
+    board = expireReplies(board, now())
     publish()
     if (eventsDuringSnapshot && !snapshotDue) scheduleSnapshot()
     return snapshot
@@ -328,6 +333,13 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
     },
     current() {
       return state
+    },
+    card(paneId) {
+      return board.cards.get(paneId)
+    },
+    recordReply(paneId, summary) {
+      board = applyReply(board, paneId, summary, now())
+      publish()
     },
     onChange(listener) {
       listeners.add(listener)
