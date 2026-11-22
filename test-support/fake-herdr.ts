@@ -20,6 +20,7 @@ export interface FakeHerdr {
   setSnapshotDelay(ms: number): void
   setSubscribeError(error: { code: string; message: string } | null): void
   setReplyError(error: { code: string; message: string } | null): void
+  onInput(handler: ((request: ReceivedRequest) => void) | null): void
   pushStatus(paneId: string, status: string, workspaceId?: string): void
   pushRaw(line: string): void
   stop(): Promise<void>
@@ -153,6 +154,7 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
   let snapshotDelayMs = 0
   let subscribeError: { code: string; message: string } | null = null
   let replyError: { code: string; message: string } | null = null
+  let inputHandler: ((request: ReceivedRequest) => void) | null = null
   const reads = new Map<string, string>(Object.entries(options.reads ?? {}))
   const connections = new Set<net.Socket>()
   const subscribers = new Set<net.Socket>()
@@ -179,6 +181,9 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
     },
     setReplyError(error) {
       replyError = error
+    },
+    onInput(handler) {
+      inputHandler = handler
     },
     setRead(paneId, text) {
       if (text === null) reads.delete(paneId)
@@ -252,6 +257,7 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
         socket.end(`${JSON.stringify({ id, error: replyError })}\n`)
         return
       }
+      inputHandler?.({ method, params })
       const target = isObject(params) ? (params['target'] ?? params['pane_id']) : undefined
       const result =
         method === 'agent.prompt'

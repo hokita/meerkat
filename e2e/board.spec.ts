@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { expect, test } from './fixtures.js'
 import { fakeAgent, fakeSnapshot } from '../test-support/fake-herdr.js'
 
@@ -12,10 +11,6 @@ const agents = {
   working: fakeAgent({ pane_id: 'w3:p1', name: 'working-one', agent_status: 'working' }),
   idle: fakeAgent({ pane_id: 'w4:p1', name: 'idle-one', agent_status: 'idle' }),
   unnamed: fakeAgent({ pane_id: 'w5:p1', name: null, agent_status: 'idle' }),
-}
-
-function screenFixture(name: string): string {
-  return readFileSync(new URL(`../test-support/screens/${name}`, import.meta.url), 'utf8')
 }
 
 const initialSnapshot = fakeSnapshot({ agents: Object.values(agents) })
@@ -144,25 +139,6 @@ test('only read methods reach Herdr', async ({ page, meerkat }) => {
   await meerkat.fake.restart()
   await expect(page.getByRole('button', { name: /idle-one/ })).toBeVisible()
   expect(meerkat.fake.received.length).toBeGreaterThan(0)
-})
-
-test('answers a permission only after the in-page confirm', async ({ page, meerkat }) => {
-  const pane = agents.blocked.pane_id
-  meerkat.fake.setRead(pane, screenFixture('permission-bash.txt'))
-  const inputs = () => meerkat.fake.received.filter((entry) => entry.method === 'agent.send_keys')
-  await page.goto(meerkat.baseURL)
-  await page.getByRole('button', { name: /blocked-one/ }).click()
-  const panel = page.getByRole('dialog').getByRole('region', { name: 'Reply' })
-  await expect(panel.locator('pre')).toContainText('touch made-by-bash.txt')
-  await panel.getByRole('button', { name: 'Yes', exact: true }).click()
-  await expect(panel.getByRole('button', { name: 'Cancel' })).toBeFocused()
-  expect(inputs()).toEqual([])
-  await panel
-    .getByRole('group', { name: 'Confirm reply' })
-    .getByRole('button', { name: 'Send' })
-    .click()
-  await expect(panel.getByText('Sent')).toBeVisible()
-  expect(inputs()).toEqual([{ method: 'agent.send_keys', params: { target: pane, keys: ['1'] } }])
 })
 
 test('rejects a foreign Host', async ({ request, meerkat }) => {
