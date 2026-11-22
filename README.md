@@ -16,6 +16,8 @@ npm start
 Then open http://localhost:4321. Herdr must be running for the board to fill; until Meerkat can reach
 it, the page shows `Herdr is not reachable — showing last known state`.
 
+Each card shows the session's latest update and how long ago it changed.
+
 | Variable               | Default                      | Meaning                       |
 | ---------------------- | ---------------------------- | ----------------------------- |
 | `MEERKAT_PORT`         | `4321`                       | Port, an integer from 1-65535 |
