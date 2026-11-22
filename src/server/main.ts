@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createHerdrClient } from './herdr/client.js'
+import { createReplySender } from './herdr/reply-sender.js'
 import { createToken } from './guard.js'
 import { createHttpServer, listen } from './http.js'
 import { createSupervisor } from './supervisor.js'
@@ -38,6 +39,7 @@ export async function run(env: NodeJS.ProcessEnv, home: string): Promise<void> {
   const server = createHttpServer({
     supervisor,
     client,
+    sender: createReplySender({ socketPath: config.socketPath }),
     port: config.port,
     token: createToken(),
     staticDir: config.staticDir,

@@ -1,13 +1,18 @@
 import { readFile, stat } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
+import { checkReplyRequest } from './guard.js'
 import type { HerdrClient } from './herdr/client.js'
+import type { ReplySender } from './herdr/reply-sender.js'
+import { paneIdFromSegment } from './pane-id.js'
 import { readPrompt } from './read-prompt.js'
+import { createReplyMemory, serveReply, type ReplyDeps } from './reply.js'
 import type { Supervisor, SupervisorState } from './supervisor.js'
 
 export interface HttpServerOptions {
-  supervisor: Pick<Supervisor, 'current' | 'onChange' | 'card'>
+  supervisor: Pick<Supervisor, 'current' | 'onChange' | 'card' | 'recordReply' | 'refreshProgress'>
   client: HerdrClient
+  sender: ReplySender
   port: number
   token: string
   staticDir: string
@@ -24,10 +29,9 @@ export class PortInUseError extends Error {
 }
 
 const DEFAULT_HEARTBEAT_MS = 15000
-const PANE_ID = /^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/
 const BASE64URL = /^[A-Za-z0-9_-]+$/
 const TOKEN_META = /<meta name="meerkat-token" content="[^"]*"/
-const REPLY_ROUTE = /^\/api\/sessions\/[^/]+\/reply$/
+const REPLY_ROUTE = /^\/api\/sessions\/([^/]+)\/reply$/
 const OUTPUT_ROUTE = /^\/api\/sessions\/([^/]+)\/output$/
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -124,8 +128,8 @@ async function serveOutput(
   encodedId: string,
   opts: HttpServerOptions
 ): Promise<void> {
-  const target = decodeSegment(encodedId)
-  if (target === null || !PANE_ID.test(target)) {
+  const target = paneIdFromSegment(encodedId)
+  if (target === null) {
     sendJson(res, 400, { error: 'invalid_pane_id' })
     return
   }
@@ -199,8 +203,36 @@ async function serveStatic(
   res.end(withToken(index, token))
 }
 
+const GUARD_REFUSALS = {
+  forbidden: { status: 403, error: 'forbidden' },
+  unsupported_media: { status: 415, error: 'unsupported_media' },
+} as const
+
+async function postReply(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  segment: string,
+  opts: HttpServerOptions,
+  deps: ReplyDeps
+): Promise<void> {
+  const guard = checkReplyRequest(req, opts.token, opts.port)
+  if (guard !== 'ok') {
+    const refusal = GUARD_REFUSALS[guard]
+    sendJson(res, refusal.status, { error: refusal.error })
+    return
+  }
+  const result = await serveReply(deps, req, segment)
+  sendJson(res, result.status, result.body)
+}
+
 export function createHttpServer(opts: HttpServerOptions): http.Server {
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS
+  const replyDeps: ReplyDeps = {
+    supervisor: opts.supervisor,
+    read: (paneId) => readPrompt(opts, paneId),
+    sender: opts.sender,
+    memory: createReplyMemory(),
+  }
 
   async function route(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     if (!isAllowedHost(req.headers.host, opts.port)) {
@@ -208,9 +240,13 @@ export function createHttpServer(opts: HttpServerOptions): http.Server {
       return
     }
     const pathname = (req.url ?? '/').split('?')[0] ?? '/'
-    if (req.method !== 'GET') {
-      const allow = REPLY_ROUTE.test(pathname) ? 'POST' : 'GET'
-      sendText(res, 405, 'Method Not Allowed', { Allow: allow })
+    const reply = REPLY_ROUTE.exec(pathname)
+    if (reply !== null && req.method === 'POST') {
+      await postReply(req, res, reply[1] ?? '', opts, replyDeps)
+      return
+    }
+    if (reply !== null || req.method !== 'GET') {
+      sendText(res, 405, 'Method Not Allowed', { Allow: reply === null ? 'GET' : 'POST' })
       return
     }
     if (pathname === '/api/events') {

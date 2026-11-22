@@ -9,6 +9,7 @@ import { fakeSnapshot, startFakeHerdr, type FakeHerdr } from '../../test-support
 import type { BoardView, Card } from '../shared/types.js'
 import { createToken } from './guard.js'
 import { createHerdrClient } from './herdr/client.js'
+import { createReplySender } from './herdr/reply-sender.js'
 import { createHttpServer, isAllowedHost, listen, PortInUseError } from './http.js'
 import type { SupervisorState } from './supervisor.js'
 
@@ -51,6 +52,10 @@ interface Stub {
   card(paneId: string): Card | undefined
   onChange(listener: (state: SupervisorState) => void): () => void
   emit(state: SupervisorState): void
+  replies: Array<[string, string]>
+  refreshed: string[]
+  recordReply(paneId: string, summary: string): void
+  refreshProgress(paneId: string): void
 }
 
 function stubSupervisor(state: SupervisorState): Stub {
@@ -75,6 +80,14 @@ function stubSupervisor(state: SupervisorState): Stub {
     emit(next) {
       stub.state = next
       for (const listener of [...stub.listeners]) listener(next)
+    },
+    replies: [],
+    refreshed: [],
+    recordReply(paneId, summary) {
+      stub.replies.push([paneId, summary])
+    },
+    refreshProgress(paneId) {
+      stub.refreshed.push(paneId)
     },
   }
   return stub
@@ -113,6 +126,7 @@ async function harness(
   const real = createHttpServer({
     supervisor: stub,
     client: createHerdrClient({ socketPath: fake.socketPath, timeoutMs: 500 }),
+    sender: createReplySender({ socketPath: fake.socketPath, timeoutMs: 500 }),
     port,
     token,
     staticDir,
@@ -137,7 +151,12 @@ interface Reply {
 function get(
   h: Harness,
   path: string,
-  opts: { method?: string; host?: string | null; headers?: http.OutgoingHttpHeaders } = {}
+  opts: {
+    method?: string
+    host?: string | null
+    headers?: http.OutgoingHttpHeaders
+    body?: string
+  } = {}
 ): Promise<Reply> {
   const headers: http.OutgoingHttpHeaders = { ...opts.headers }
   if (opts.host !== null) headers['Host'] = opts.host ?? `localhost:${h.port}`
@@ -157,7 +176,7 @@ function get(
       }
     )
     req.on('error', reject)
-    req.end()
+    req.end(opts.body)
   })
 }
 
@@ -458,6 +477,151 @@ describe('GET /api/sessions/:id/output', () => {
     const reply = await get(h, '/api/sessions/w1H:p1/output')
     expect(reply.status).toBe(502)
     expect(JSON.parse(reply.body)).toEqual({ error: 'herdr_error' })
+  })
+})
+
+function replyHeaders(h: Harness): http.OutgoingHttpHeaders {
+  return {
+    Origin: `http://localhost:${h.port}`,
+    'X-Meerkat-Token': h.token,
+    'Content-Type': 'application/json',
+  }
+}
+
+function post(h: Harness, paneId: string, body: unknown, headers = replyHeaders(h)) {
+  return get(h, `/api/sessions/${paneId}/reply`, {
+    method: 'POST',
+    headers,
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+}
+
+function rawRequest(h: Harness, request: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(h.port, '127.0.0.1', () => socket.write(request))
+    let data = ''
+    socket.setEncoding('utf8')
+    socket.on('data', (chunk: string) => {
+      data += chunk
+    })
+    socket.on('end', () => resolve(data))
+    socket.on('error', reject)
+  })
+}
+
+function sends(h: Harness): string[] {
+  return h.fake.received.map((r) => r.method).filter((method) => method !== 'agent.read')
+}
+
+describe('POST /api/sessions/:id/reply', () => {
+  it('re-reads the pane and sends the chosen option', async () => {
+    const h = await outputHarness('w2:p1')
+    h.fake.setRead('w2:p1', screen('permission-bash.txt'))
+    const output = JSON.parse((await get(h, '/api/sessions/w2:p1/output')).body) as {
+      prompt: { fingerprint: string }
+    }
+    h.fake.received.length = 0
+    const reply = await post(h, 'w2:p1', {
+      replyId: 'reply-0001',
+      fingerprint: output.prompt.fingerprint,
+      action: { type: 'option', n: 1 },
+    })
+    expect(reply.status).toBe(200)
+    expect(JSON.parse(reply.body)).toEqual({ sent: 1 })
+    expect(h.fake.received.map((r) => r.method)).toEqual(['agent.read', 'agent.send_keys'])
+    expect(h.fake.received[1]?.params).toEqual({ target: 'w2:p1', keys: ['1'] })
+    expect(h.stub.replies).toEqual([['w2:p1', 'Answered "Yes"']])
+    expect(h.stub.refreshed).toEqual(['w2:p1'])
+    const again = await post(h, 'w2:p1', {
+      replyId: 'reply-0001',
+      fingerprint: output.prompt.fingerprint,
+      action: { type: 'option', n: 1 },
+    })
+    expect(JSON.parse(again.body)).toEqual({ sent: 1 })
+    expect(sends(h)).toEqual(['agent.send_keys'])
+  })
+
+  it('answers 409 prompt_changed with the fresh prompt and sends nothing', async () => {
+    const h = await outputHarness('w2:p1')
+    h.fake.setRead('w2:p1', screen('permission-bash.txt'))
+    const reply = await post(h, 'w2:p1', {
+      replyId: 'reply-0001',
+      fingerprint: 'f'.repeat(64),
+      action: { type: 'option', n: 1 },
+    })
+    expect(reply.status).toBe(409)
+    const body = JSON.parse(reply.body) as { error: string; prompt: { kind: string } }
+    expect(body.error).toBe('prompt_changed')
+    expect(body.prompt.kind).toBe('permission')
+    expect(sends(h)).toEqual([])
+  })
+
+  it('refuses a missing token with 403 and a form content type with 415', async () => {
+    const h = await outputHarness('w2:p1')
+    const action = {
+      replyId: 'reply-0001',
+      fingerprint: 'f'.repeat(64),
+      action: { type: 'option', n: 1 },
+    }
+    const noToken = { ...replyHeaders(h) }
+    delete noToken['X-Meerkat-Token']
+    expect((await post(h, 'w2:p1', action, noToken)).status).toBe(403)
+    const form = { ...replyHeaders(h), 'Content-Type': 'application/x-www-form-urlencoded' }
+    expect((await post(h, 'w2:p1', action, form)).status).toBe(415)
+    expect(h.fake.received).toEqual([])
+  })
+
+  it('refuses repeated Origin or X-Meerkat-Token headers with 403', async () => {
+    const h = await outputHarness('w2:p1')
+    h.fake.setRead('w2:p1', screen('permission-bash.txt'))
+    const body = JSON.stringify({
+      replyId: 'reply-0001',
+      fingerprint: 'f'.repeat(64),
+      action: { type: 'option', n: 1 },
+    })
+    const origin = `Origin: http://localhost:${h.port}`
+    const token = `X-Meerkat-Token: ${h.token}`
+    const send = (headers: string[]) =>
+      rawRequest(
+        h,
+        [
+          'POST /api/sessions/w2:p1/reply HTTP/1.1',
+          `Host: localhost:${h.port}`,
+          ...headers,
+          'Content-Type: application/json',
+          `Content-Length: ${Buffer.byteLength(body)}`,
+          'Connection: close',
+          '',
+          body,
+        ].join('\r\n')
+      )
+    for (const headers of [
+      [origin, origin, token],
+      [origin, token, token],
+    ]) {
+      expect((await send(headers)).startsWith('HTTP/1.1 403')).toBe(true)
+    }
+    expect(h.fake.received).toEqual([])
+    expect((await send([origin, token])).startsWith('HTTP/1.1 409')).toBe(true)
+    expect(sends(h)).toEqual([])
+  })
+
+  it('answers 413 for a body over 8 KB', async () => {
+    const h = await outputHarness('w2:p1')
+    const reply = await post(h, 'w2:p1', ' '.repeat(9000))
+    expect(reply.status).toBe(413)
+    expect(JSON.parse(reply.body)).toEqual({ error: 'body_too_large' })
+    expect(h.fake.received).toEqual([])
+  })
+
+  it('answers 405 Allow: POST for other methods on the reply route', async () => {
+    const h = await outputHarness('w2:p1')
+    for (const method of ['GET', 'PUT', 'DELETE']) {
+      const reply = await get(h, '/api/sessions/w2:p1/reply', { method, headers: replyHeaders(h) })
+      expect(reply.status).toBe(405)
+      expect(reply.headers['allow']).toBe('POST')
+    }
+    expect(h.fake.received).toEqual([])
   })
 })
 
