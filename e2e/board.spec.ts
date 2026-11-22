@@ -125,6 +125,24 @@ test.describe('with progress reads', () => {
     await expect(attention).toContainText('Docs written; all checks pass.')
     await expect(attention).toContainText(/updated \d+s ago/)
   })
+
+  test('shows the newest sentence for a blocked session on a short pane', async ({
+    page,
+    meerkat,
+  }) => {
+    await page.goto(meerkat.baseURL)
+    const working = column(page, 'Working').getByRole('button', { name: /working-one/ })
+    await expect(working).toContainText('Tests are green; writing the docs next.')
+
+    meerkat.fake.setBusyViewport(agents.working.pane_id, 28)
+    meerkat.fake.setRead(
+      agents.working.pane_id,
+      '⏺ Need your OK to proceed.\n─────\n Do you want to proceed?\n ❯ 1. Yes\n   2. No'
+    )
+    meerkat.fake.pushStatus(agents.working.pane_id, 'blocked')
+    const attention = column(page, 'Needs attention').getByRole('button', { name: /working-one/ })
+    await expect(attention).toContainText('Need your OK to proceed.')
+  })
 })
 
 test('only read methods reach Herdr', async ({ page, meerkat }) => {

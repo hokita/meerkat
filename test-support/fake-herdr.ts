@@ -17,6 +17,8 @@ export interface FakeHerdr {
   connectionCount: number
   setSnapshot(snapshot: unknown): void
   setRead(paneId: string, text: string | null): void
+  setBusyViewport(paneId: string, rows: number | null): void
+  setVisibleReadError(paneId: string, error: { code: string; message: string } | null): void
   setSnapshotDelay(ms: number): void
   setSubscribeError(error: { code: string; message: string } | null): void
   setReplyError(error: { code: string; message: string } | null): void
@@ -156,6 +158,8 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
   let replyError: { code: string; message: string } | null = null
   let inputHandler: ((request: ReceivedRequest) => void) | null = null
   const reads = new Map<string, string>(Object.entries(options.reads ?? {}))
+  const busyViewports = new Map<string, number>()
+  const visibleReadErrors = new Map<string, { code: string; message: string }>()
   const connections = new Set<net.Socket>()
   const subscribers = new Set<net.Socket>()
   const dir = await mkdtemp(join(tmpdir(), 'mk-'))
@@ -184,6 +188,14 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
     },
     onInput(handler) {
       inputHandler = handler
+    },
+    setBusyViewport(paneId, rows) {
+      if (rows === null) busyViewports.delete(paneId)
+      else busyViewports.set(paneId, rows)
+    },
+    setVisibleReadError(paneId, error) {
+      if (error === null) visibleReadErrors.delete(paneId)
+      else visibleReadErrors.set(paneId, error)
     },
     setRead(paneId, text) {
       if (text === null) reads.delete(paneId)
@@ -233,6 +245,26 @@ export async function startFakeHerdr(options: FakeHerdrOptions): Promise<FakeHer
         const error = {
           code: 'agent_not_found',
           message: `agent target ${String(target)} not found`,
+        }
+        socket.end(`${JSON.stringify({ id, error })}\n`)
+        return
+      }
+      const rows = busyViewports.get(target)
+      const lines = isObject(params) ? params['lines'] : undefined
+      const source = isObject(params) ? params['source'] : undefined
+      const visibleError = visibleReadErrors.get(target)
+      if (source === 'visible' && visibleError !== undefined) {
+        socket.end(`${JSON.stringify({ id, error: visibleError })}\n`)
+        return
+      }
+      if (
+        rows !== undefined &&
+        source !== 'visible' &&
+        (typeof lines !== 'number' || lines > rows)
+      ) {
+        const error = {
+          code: 'agent_not_idle',
+          message: `cannot read ${String(lines)} lines while ${target} is blocked: its alternate-screen history can only be captured by scrolling while idle. Wait and retry, or use --source visible`,
         }
         socket.end(`${JSON.stringify({ id, error })}\n`)
         return

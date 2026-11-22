@@ -81,6 +81,39 @@ describe('server', () => {
     })
   })
 
+  it('refuses recent reads longer than a busy pane viewport, like Herdr', async () => {
+    const fake = await start({ snapshot: fakeSnapshot({ agents: [] }), reads: { 'w2:p1': 'hi' } })
+    const client = createHerdrClient({ socketPath: fake.socketPath })
+    fake.setBusyViewport('w2:p1', 28)
+    const read = (params: object) =>
+      client.request('agent.read', { target: 'w2:p1', ...params }).then(parseReadResponse)
+    await expect(read({ source: 'recent_unwrapped', lines: 29 })).rejects.toMatchObject({
+      code: 'agent_not_idle',
+    })
+    await expect(read({ source: 'recent_unwrapped', lines: 28 })).resolves.toMatchObject({
+      text: 'hi',
+    })
+    await expect(read({ source: 'visible' })).resolves.toMatchObject({ text: 'hi' })
+    fake.setBusyViewport('w2:p1', null)
+    await expect(read({ source: 'recent_unwrapped', lines: 120 })).resolves.toMatchObject({
+      text: 'hi',
+    })
+  })
+
+  it('answers visible reads of a pane with the set error', async () => {
+    const fake = await start({ snapshot: fakeSnapshot({ agents: [] }), reads: { 'w2:p1': 'hi' } })
+    const client = createHerdrClient({ socketPath: fake.socketPath })
+    fake.setVisibleReadError('w2:p1', { code: 'agent_not_idle', message: 'x' })
+    const read = (params: object) =>
+      client.request('agent.read', { target: 'w2:p1', ...params }).then(parseReadResponse)
+    await expect(read({ source: 'visible' })).rejects.toMatchObject({ code: 'agent_not_idle' })
+    await expect(read({ source: 'recent_unwrapped', lines: 120 })).resolves.toMatchObject({
+      text: 'hi',
+    })
+    fake.setVisibleReadError('w2:p1', null)
+    await expect(read({ source: 'visible' })).resolves.toMatchObject({ text: 'hi' })
+  })
+
   it('pushes raw lines and status events to subscribers', async () => {
     const fake = await start({ snapshot: fakeSnapshot({ agents: [] }) })
     const client = createHerdrClient({ socketPath: fake.socketPath })
