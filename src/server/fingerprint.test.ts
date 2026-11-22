@@ -67,6 +67,13 @@ describe('fingerprint', () => {
       expect(fingerprint({ ...input, statusEpoch: 4 })).not.toBe(a)
     })
 
+    it('filters volatile lines before taking the last 40', () => {
+      const tail = Array.from({ length: 40 }, (_, i) => `line ${i}`)
+      const a = fingerprint({ ...input, text: tail.join('\n') })
+      const withSpinner = [...tail.slice(0, 20), '✻ Working… (3s)', ...tail.slice(20)].join('\n')
+      expect(fingerprint({ ...input, text: withSpinner })).toBe(a)
+    })
+
     it('only considers the last 40 lines', () => {
       const tail = Array.from({ length: 40 }, (_, i) => `line ${i}`)
       const a = fingerprint({ ...input, text: ['old', ...tail].join('\n') })
@@ -93,5 +100,30 @@ describe('withFingerprint', () => {
     ).toEqual({
       kind: 'none',
     })
+  })
+})
+
+describe('idle', () => {
+  const rule = '─'.repeat(40)
+  const idleScreen = (suggestion: string, spinner = '') =>
+    ['done', spinner, rule, `❯ ${suggestion}`, rule, '  ⏵⏵ accept edits on'].join('\n')
+  const input = (text: string) => ({
+    paneId: 'p1',
+    terminalId: 't1',
+    statusEpoch: 1,
+    prompt: { kind: 'idle' } as RecognizedPrompt,
+    text,
+  })
+
+  it('changes when the suggestion text changes', () => {
+    expect(fingerprint(input(idleScreen('run the tests')))).not.toBe(
+      fingerprint(input(idleScreen('open a PR')))
+    )
+  })
+
+  it('ignores spinner changes outside the box', () => {
+    expect(fingerprint(input(idleScreen('run the tests', '✻ Working… (3s)')))).toBe(
+      fingerprint(input(idleScreen('run the tests')))
+    )
   })
 })

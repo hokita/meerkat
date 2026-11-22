@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { Prompt, RecognizedPrompt } from '../shared/types.js'
+import { MARKER, collapse, ruleIndices, screenLines } from './prompt-blocks.js'
 import { isVolatileLine } from './progress.js'
 
 const UNRECOGNIZED_LINES = 40
@@ -27,15 +28,29 @@ function canonical(value: unknown): string {
 }
 
 function unrecognizedBlock(text: string): string[] {
-  return text
-    .split('\n')
-    .map((line) => line.replaceAll(' ', ' ').trimEnd())
-    .slice(-UNRECOGNIZED_LINES)
+  return screenLines(text)
     .filter((line) => !isVolatileLine(line))
+    .slice(-UNRECOGNIZED_LINES)
+}
+
+function idleBoxLine(text: string): string {
+  const lines = screenLines(text)
+  const rules = ruleIndices(lines)
+  const last = rules.at(-1)
+  const previous = rules.at(-2)
+  if (last === undefined || previous === undefined || previous + 2 !== last) return ''
+  const box = lines[previous + 1] ?? ''
+  return box.startsWith(MARKER) ? collapse(box.slice(MARKER.length)) : ''
+}
+
+function blockOf(input: FingerprintInput): unknown {
+  if (input.prompt.kind === 'unrecognized') return unrecognizedBlock(input.text)
+  if (input.prompt.kind === 'idle') return { kind: 'idle', box: idleBoxLine(input.text) }
+  return input.prompt
 }
 
 export function fingerprint(input: FingerprintInput): string {
-  const block = input.prompt.kind === 'unrecognized' ? unrecognizedBlock(input.text) : input.prompt
+  const block = blockOf(input)
   const payload = canonical({
     paneId: input.paneId,
     terminalId: input.terminalId,
