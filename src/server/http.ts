@@ -4,7 +4,7 @@ import path from 'node:path'
 import { checkReplyRequest } from './guard.js'
 import type { HerdrClient } from './herdr/client.js'
 import type { ReplySender } from './herdr/reply-sender.js'
-import { paneIdFromSegment } from './pane-id.js'
+import { decodeSegment, paneIdFromSegment } from './pane-id.js'
 import { readPrompt } from './read-prompt.js'
 import { createReplyMemory, serveReply, type ReplyDeps } from './reply.js'
 import type { Supervisor, SupervisorState } from './supervisor.js'
@@ -85,14 +85,6 @@ function sendText(
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, baseHeaders('application/json; charset=utf-8'))
   res.end(JSON.stringify(body))
-}
-
-function decodeSegment(value: string): string | null {
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return null
-  }
 }
 
 function serveEvents(
