@@ -5,6 +5,8 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 dir="${1:-$root/.github/workflows}"
 pinned='^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$'
 mentions='(^|[^A-Za-z0-9_-])["'"'"']?uses["'"'"']?[[:space:]]*:'
+explicit_key='^[[:space:]]*(-[[:space:]]+)?\?'
+escaped_key='("[^"]*\\[^"]*"|'"'"'[^'"'"']*\\[^'"'"']*'"'"')[[:space:]]*:'
 supported='^[[:space:]]*(-[[:space:]]+)?(uses|"uses"|'"'"'uses'"'"')[[:space:]]*:'
 
 shopt -s nullglob
@@ -15,7 +17,7 @@ if [ "${#files[@]}" -eq 0 ]; then
 fi
 
 status=0
-matches="$(grep -nHE "$mentions" "${files[@]}")" || status=$?
+matches="$(grep -nHE -e "$mentions" -e "$explicit_key" -e "$escaped_key" "${files[@]}")" || status=$?
 if [ "$status" -gt 1 ]; then
   echo "could not read workflow files in $dir"
   exit 1

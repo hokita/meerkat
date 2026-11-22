@@ -116,6 +116,48 @@ describe('check-action-pins.sh', () => {
     expect(run().status).toBe(0)
   })
 
+  it('rejects an explicit-key uses', () => {
+    writeFileSync(
+      join(dir, 'ci.yml'),
+      workflow('x').replace('- uses: x', '- ? uses\n        : actions/checkout@v4')
+    )
+    expect(run().status).toBe(1)
+  })
+
+  it('rejects an explicit key without a dash', () => {
+    writeFileSync(
+      join(dir, 'ci.yml'),
+      `${workflow(`actions/checkout@${SHA}`)}      ? uses\n      : actions/checkout@v4\n`
+    )
+    expect(run().status).toBe(1)
+  })
+
+  it('rejects a double-quoted key with an escape', () => {
+    writeFileSync(
+      join(dir, 'ci.yml'),
+      workflow('x').replace('uses: x', '"\\x75ses": actions/checkout@v4')
+    )
+    const result = run()
+    expect(result.status).toBe(1)
+    expect(result.stdout).toContain('unsupported')
+  })
+
+  it('rejects a single-quoted key with a backslash', () => {
+    writeFileSync(
+      join(dir, 'ci.yml'),
+      workflow('x').replace('uses: x', "'u\\ses': actions/checkout@v4")
+    )
+    expect(run().status).toBe(1)
+  })
+
+  it('passes a backslash inside a run value', () => {
+    writeFileSync(
+      join(dir, 'ci.yml'),
+      `${workflow(`actions/checkout@${SHA}`)}        run: echo "a\\b"\n`
+    )
+    expect(run().status).toBe(0)
+  })
+
   it('fails when the directory has no workflow files', () => {
     const result = run()
     expect(result.status).toBe(1)
