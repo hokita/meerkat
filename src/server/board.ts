@@ -50,6 +50,7 @@ export function boardFromSnapshot(
       status: agent.status,
       since: unchanged ? previous.since : now,
       sinceIsLowerBound: unchanged ? previous.sinceIsLowerBound : true,
+      progress: previous?.progress ?? null,
     })
   }
   return { cards }
@@ -72,6 +73,22 @@ export function applyStatusEvent(
       ? { ...card, title, status: ev.status, since: now, sinceIsLowerBound: false }
       : { ...card, title }
   )
+  return { cards }
+}
+
+export function applyProgress(
+  state: BoardState,
+  paneId: string,
+  text: string,
+  now: number
+): BoardState {
+  const card = state.cards.get(paneId)
+  if (card === undefined || card.progress?.text === text) return state
+  const cards = new Map(state.cards)
+  cards.set(paneId, {
+    ...card,
+    progress: { text, since: now, sinceIsLowerBound: card.progress === null },
+  })
   return { cards }
 }
 

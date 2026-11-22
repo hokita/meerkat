@@ -18,6 +18,7 @@ function card(overrides: Partial<Card> = {}): Card {
     status: 'working',
     since: now - 60_000,
     sinceIsLowerBound: false,
+    progress: null,
     ...overrides,
   }
 }
