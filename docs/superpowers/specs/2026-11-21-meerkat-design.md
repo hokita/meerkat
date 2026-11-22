@@ -27,6 +27,29 @@ still working (and for how long), and which are idle, kept live without reloadin
 - Survives Herdr restarting: Meerkat reconnects and rebuilds its state by itself.
 - Starts with `npm start` (build + serve), then the user opens http://localhost:4321.
 
+### Update 2026-11-23: four columns
+
+The user approved splitting Needs attention in two (option A, 2026-11-22), because a session that asks a question
+and a session that has finished need different things from the user. The board now has four columns, left to
+right (top to bottom on a phone):
+
+| Column          | Herdr `agent_status`      | Order                                  |
+| --------------- | ------------------------- | -------------------------------------- |
+| Waiting for you | `blocked`                 | longest waiting first                  |
+| Done            | `done`                    | longest done first **(my call)**       |
+| Working         | `working`                 | longest running first                  |
+| Idle            | `idle`, `unknown`, others | by name                                |
+
+- The column still comes only from Herdr's status (`columnOf` in `src/server/board.ts`); the board view sent over
+  SSE has the keys `waiting`, `done`, `working`, `idle` (replacing `attention`).
+- Every column is always shown with its count badge; an empty one says "Nothing here", as before.
+- Widths **(my call)**: four columns from 1100 px, a 2 × 2 grid from 720 px to 1099 px (Waiting for you and Done
+  on top), one stacked column below 720 px. No horizontal scrolling at any width.
+- Unchanged: cards, pills, progress sentences, the Reply label (blocked, done, idle), the reply drawer, live
+  updates and the reply-superseding rules.
+- A browser tab left open across a Meerkat upgrade gets the new board shape from the new server while running
+  the old page; it must be reloaded once.
+
 ## Non-goals
 
 > Update 2026-11-22: sending input to agents is now built, narrowly. See `2026-11-22-reply-design.md`. The list below is the original.
