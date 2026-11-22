@@ -8,7 +8,7 @@ import { useMeerkatStream } from './useMeerkatStream'
 
 function findCard(board: BoardView | null, paneId: string | null): Card | null {
   if (board === null || paneId === null) return null
-  const all = [...board.attention, ...board.working, ...board.idle]
+  const all = [...board.waiting, ...board.done, ...board.working, ...board.idle]
   return all.find((card) => card.paneId === paneId) ?? null
 }
 

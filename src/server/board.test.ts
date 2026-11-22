@@ -39,8 +39,8 @@ function snapshot(agents: HerdrAgent[]): HerdrSnapshot {
 
 describe('columnOf', () => {
   it('maps statuses to columns', () => {
-    expect(columnOf('done')).toBe('attention')
-    expect(columnOf('blocked')).toBe('attention')
+    expect(columnOf('blocked')).toBe('waiting')
+    expect(columnOf('done')).toBe('done')
     expect(columnOf('working')).toBe('working')
     expect(columnOf('idle')).toBe('idle')
     expect(columnOf('unknown')).toBe('idle')
@@ -194,8 +194,10 @@ describe('applyStatusEvent', () => {
 describe('toView', () => {
   it('groups and orders cards', () => {
     const agents = [
-      agent('a1', 'done'),
-      agent('a2', 'blocked'),
+      agent('b1', 'blocked'),
+      agent('b2', 'blocked'),
+      agent('d1', 'done'),
+      agent('d2', 'done'),
       agent('w1', 'working'),
       agent('w2', 'working'),
       agent('i1', 'idle', { name: 'zed' }),
@@ -204,16 +206,36 @@ describe('toView', () => {
       agent('i3', 'idle'),
     ]
     let state = boardFromSnapshot(null, snapshot(agents), 1000, HOME)
-    state = applyStatusEvent(state, { paneId: 'a1', status: 'blocked' }, 3000)
-    state = applyStatusEvent(state, { paneId: 'a2', status: 'done' }, 2000)
+    state = applyStatusEvent(state, { paneId: 'b1', status: 'done' }, 3000)
+    state = applyStatusEvent(state, { paneId: 'b1', status: 'blocked' }, 3500)
+    state = applyStatusEvent(state, { paneId: 'b2', status: 'done' }, 2000)
+    state = applyStatusEvent(state, { paneId: 'b2', status: 'blocked' }, 2500)
+    state = applyStatusEvent(state, { paneId: 'd1', status: 'blocked' }, 5000)
+    state = applyStatusEvent(state, { paneId: 'd1', status: 'done' }, 5200)
+    state = applyStatusEvent(state, { paneId: 'd2', status: 'blocked' }, 4800)
+    state = applyStatusEvent(state, { paneId: 'd2', status: 'done' }, 4900)
     state = applyStatusEvent(state, { paneId: 'w1', status: 'idle' }, 4000)
     state = applyStatusEvent(state, { paneId: 'w1', status: 'working' }, 4500)
     state = applyStatusEvent(state, { paneId: 'w2', status: 'idle' }, 4600)
     state = applyStatusEvent(state, { paneId: 'w2', status: 'working' }, 4100)
     const view = toView(state)
-    expect(view.attention.map((c) => c.paneId)).toEqual(['a2', 'a1'])
+    expect(Object.keys(view)).toEqual(['waiting', 'done', 'working', 'idle'])
+    expect(view.waiting.map((c) => c.paneId)).toEqual(['b2', 'b1'])
+    expect(view.done.map((c) => c.paneId)).toEqual(['d2', 'd1'])
     expect(view.working.map((c) => c.paneId)).toEqual(['w2', 'w1'])
     expect(view.idle.map((c) => c.paneId)).toEqual(['i3', 'i4', 'i2', 'i1'])
+  })
+
+  it('moves a card between Waiting for you and Done', () => {
+    let state = boardFromSnapshot(null, snapshot([agent('p1', 'blocked')]), 1000, HOME)
+    state = applyStatusEvent(state, { paneId: 'p1', status: 'done' }, 2000)
+    let view = toView(state)
+    expect(view.waiting).toEqual([])
+    expect(view.done.map((c) => [c.paneId, c.since])).toEqual([['p1', 2000]])
+    state = applyStatusEvent(state, { paneId: 'p1', status: 'blocked' }, 3000)
+    view = toView(state)
+    expect(view.done).toEqual([])
+    expect(view.waiting.map((c) => [c.paneId, c.since])).toEqual([['p1', 3000]])
   })
 })
 

@@ -64,7 +64,10 @@ function setup(start: Card, screens: Screens) {
   }
   const deps: ReplyDeps = {
     supervisor: {
-      current: () => ({ herdr: 'connected', board: { attention: [], working: [], idle: [] } }),
+      current: () => ({
+        herdr: 'connected',
+        board: { waiting: [], done: [], working: [], idle: [] },
+      }),
       recordReply: () => undefined,
       markSent: () => undefined,
       refreshProgress: () => undefined,

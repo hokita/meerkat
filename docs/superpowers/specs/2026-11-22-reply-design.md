@@ -8,7 +8,7 @@ settled by the builder within the bounds given.
 ## Intent
 
 The user wants to answer Claude sessions' questions from Meerkat instead of switching to that session's
-terminal. Success: a session lands in Needs attention, the user opens its card, sees exactly what it asks, taps
+terminal. Success: a session lands in Waiting for you (Needs attention before 2026-11-23), the user opens its card, sees exactly what it asks, taps
 an answer (or types one), and the card shows the answer went in, without leaving the board.
 
 ## Goals

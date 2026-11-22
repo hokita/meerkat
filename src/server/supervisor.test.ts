@@ -57,14 +57,14 @@ function count(fake: FakeHerdr, method: string): number {
 }
 
 function paneIds(state: SupervisorState): string[] {
-  return [...state.board.attention, ...state.board.working, ...state.board.idle]
+  return [...state.board.waiting, ...state.board.done, ...state.board.working, ...state.board.idle]
     .map((card) => card.paneId)
     .sort()
 }
 
 function cardOf(supervisor: Supervisor, paneId: string) {
   const board = supervisor.current().board
-  return [...board.attention, ...board.working, ...board.idle].find(
+  return [...board.waiting, ...board.done, ...board.working, ...board.idle].find(
     (card) => card.paneId === paneId
   )
 }
@@ -80,7 +80,7 @@ describe('supervisor', () => {
     const supervisor = supervise(createHerdrClient({ socketPath: '/nonexistent/h.sock' }))
     expect(supervisor.current()).toEqual({
       herdr: 'connecting',
-      board: { attention: [], working: [], idle: [] },
+      board: { waiting: [], done: [], working: [], idle: [] },
     })
   })
 
@@ -119,7 +119,7 @@ describe('supervisor', () => {
     expect(subscribedPanes(fake, 0)).toEqual(['wJ:p1', 'wK:p1'])
   })
 
-  it('moves a card to attention on a status event and notifies', async () => {
+  it('moves a card to Done on a status event and notifies', async () => {
     const fake = await startFake()
     const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
     const seen: SupervisorState[] = []
@@ -128,9 +128,9 @@ describe('supervisor', () => {
     await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
     fake.pushStatus('wJ:p1', 'done')
     await vi.waitFor(() =>
-      expect(supervisor.current().board.attention.map((c) => c.paneId)).toEqual(['wJ:p1'])
+      expect(supervisor.current().board.done.map((c) => c.paneId)).toEqual(['wJ:p1'])
     )
-    expect(seen.at(-1)?.board.attention).toHaveLength(1)
+    expect(seen.at(-1)?.board.done).toHaveLength(1)
   })
 
   it('does not notify when nothing changed and survives a throwing listener', async () => {
@@ -249,7 +249,7 @@ describe('supervisor', () => {
     fake.pushStatus('wJ:p1', 'done')
     await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(4))
     await vi.waitFor(() =>
-      expect(supervisor.current().board.attention.map((c) => c.paneId)).toEqual(['wJ:p1'])
+      expect(supervisor.current().board.done.map((c) => c.paneId)).toEqual(['wJ:p1'])
     )
   })
 
@@ -268,7 +268,7 @@ describe('supervisor', () => {
     clock = 2000
     fake.pushStatus('wJ:p1', 'done')
     await vi.waitFor(() =>
-      expect(supervisor.current().board.attention.map((c) => c.paneId)).toEqual(['wJ:p1'])
+      expect(supervisor.current().board.done.map((c) => c.paneId)).toEqual(['wJ:p1'])
     )
     fake.setSnapshotDelay(0)
     fake.setSnapshot(
@@ -283,9 +283,9 @@ describe('supervisor', () => {
     supervisor.onChange((state) => seen.push(state))
     clock = 3000
     await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(4))
-    const attention = seen.map((state) => state.board.attention.map((c) => c.paneId))
-    expect(attention.every((ids) => ids.includes('wJ:p1'))).toBe(true)
-    expect(supervisor.current().board.attention).toEqual([
+    const done = seen.map((state) => state.board.done.map((c) => c.paneId))
+    expect(done.every((ids) => ids.includes('wJ:p1'))).toBe(true)
+    expect(supervisor.current().board.done).toEqual([
       expect.objectContaining({ paneId: 'wJ:p1', since: 2000, sinceIsLowerBound: false }),
     ])
   })
@@ -316,13 +316,13 @@ describe('supervisor', () => {
     clock = 2000
     fake.pushStatus('wJ:p1', 'done')
     await vi.waitFor(() =>
-      expect(supervisor.current().board.attention).toEqual([
+      expect(supervisor.current().board.done).toEqual([
         expect.objectContaining({ paneId: 'wJ:p1', since: 2000, sinceIsLowerBound: false }),
       ])
     )
     await fake.stop()
     await vi.waitFor(() => expect(supervisor.current().herdr).toBe('disconnected'))
-    expect(supervisor.current().board.attention).toEqual([
+    expect(supervisor.current().board.done).toEqual([
       expect.objectContaining({ paneId: 'wJ:p1', since: 2000, sinceIsLowerBound: false }),
     ])
     fake.setSnapshot(
@@ -336,9 +336,10 @@ describe('supervisor', () => {
     clock = 5000
     await fake.restart()
     await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
-    const { attention, working, idle } = supervisor.current().board
-    expect(attention.map((card) => card.paneId)).toEqual(['wJ:p1'])
-    for (const card of [...attention, ...working, ...idle]) {
+    const { waiting, done, working, idle } = supervisor.current().board
+    expect(waiting).toEqual([])
+    expect(done.map((card) => card.paneId)).toEqual(['wJ:p1'])
+    for (const card of [...done, ...working, ...idle]) {
       expect(card).toMatchObject({ since: 5000, sinceIsLowerBound: true })
     }
   })
@@ -411,7 +412,7 @@ describe('supervisor', () => {
     const supervisor = supervise(client, { reconcileMs: 60000 })
     supervisor.start()
     await vi.waitFor(() =>
-      expect(supervisor.current().board.attention.map((c) => c.paneId)).toEqual(['wJ:p1'])
+      expect(supervisor.current().board.done.map((c) => c.paneId)).toEqual(['wJ:p1'])
     )
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(count(fake, 'session.snapshot')).toBe(2)
