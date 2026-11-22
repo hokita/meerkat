@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Card, Prompt, ReplyRequest } from '../shared/types'
 import { ReplyPanel } from './ReplyPanel'
-import type { ReplyResult } from './replyApi'
+import { parsePrompt, type ReplyResult } from './replyApi'
 
 type OutputStatus = 'ok' | 'closed' | 'unreachable' | 'error'
 
@@ -12,6 +12,7 @@ interface OutputState {
   truncated: boolean
   prompt: Prompt
   generation: number
+  epoch: number
 }
 
 const NO_PROMPT: Prompt = { kind: 'none' }
@@ -36,18 +37,11 @@ function statusFor(response: Response): OutputStatus {
   return 'error'
 }
 
-function promptOf(value: unknown): Prompt {
-  const valid =
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as Record<string, unknown>)['kind'] === 'string'
-  return valid ? (value as Prompt) : NO_PROMPT
-}
-
 async function loadOutput(
   fetchOutput: (paneId: string) => Promise<Response>,
   paneId: string,
-  generation: number
+  generation: number,
+  epoch: number
 ): Promise<OutputState> {
   const failed = (status: OutputStatus): OutputState => ({
     paneId,
@@ -56,6 +50,7 @@ async function loadOutput(
     truncated: false,
     prompt: NO_PROMPT,
     generation,
+    epoch,
   })
   try {
     const response = await fetchOutput(paneId)
@@ -67,8 +62,9 @@ async function loadOutput(
       status,
       text: body.text,
       truncated: body.truncated,
-      prompt: promptOf(body.prompt),
+      prompt: parsePrompt(body.prompt) ?? NO_PROMPT,
       generation,
+      epoch,
     }
   } catch {
     return failed('error')
@@ -98,6 +94,7 @@ export function OutputDrawer({
   const closeRef = useRef<HTMLButtonElement>(null)
 
   if (card !== null && card !== lastCard) setLastCard(card)
+  const epoch = (card ?? lastCard)?.statusEpoch ?? 0
 
   useEffect(() => {
     closeRef.current?.focus()
@@ -113,13 +110,13 @@ export function OutputDrawer({
 
   useEffect(() => {
     let cancelled = false
-    void loadOutput(fetchOutput, paneId, reloads).then((result) => {
+    void loadOutput(fetchOutput, paneId, reloads, epoch).then((result) => {
       if (!cancelled) setState((previous) => merge(previous, result))
     })
     return () => {
       cancelled = true
     }
-  }, [paneId, fetchOutput, reloads])
+  }, [paneId, fetchOutput, reloads, epoch])
 
   const current = state !== null && state.paneId === paneId ? state : null
   const text = current?.text ?? null
@@ -136,7 +133,7 @@ export function OutputDrawer({
   const loading = current === null || current.generation !== reloads
   const refresh = () => setReloads((count) => count + 1)
 
-  const panel = card !== null && current !== null && (
+  const panel = card !== null && current !== null && current.epoch === epoch && (
     <ReplyPanel
       paneId={paneId}
       name={name}

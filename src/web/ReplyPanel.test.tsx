@@ -174,6 +174,18 @@ describe('ReplyPanel permission', () => {
     expect(await screen.findByText('Herdr is not reachable')).toBeInTheDocument()
   })
 
+  it('asks for a refetch after an unsure outcome and shows its message', async () => {
+    const { user, onSent } = setup({
+      send: () =>
+        Promise.resolve({ kind: 'unsure', message: 'Could not reach Meerkat; check the output' }),
+    })
+    await user.click(
+      screen.getByRole('button', { name: 'No, and tell Claude what to do differently' })
+    )
+    expect(await screen.findByText('Could not reach Meerkat; check the output')).toBeInTheDocument()
+    expect(onSent).toHaveBeenCalledTimes(1)
+  })
+
   it('drops an open confirm when the prompt changes underneath it', async () => {
     const { user, rerender, onSent, onPromptChanged, send } = setup()
     await user.click(screen.getByRole('button', { name: 'Yes' }))

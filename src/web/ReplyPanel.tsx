@@ -113,6 +113,9 @@ export function ReplyPanel({
       setDraft({ kind: '', text: '' })
       setNotice('Sent')
       onSent()
+    } else if (result.kind === 'unsure') {
+      setNotice(result.message)
+      onSent()
     } else if (result.kind === 'prompt_changed') {
       setNotice(CHANGED)
       onPromptChanged(result.prompt)

@@ -437,6 +437,64 @@ describe('OutputDrawer', () => {
       expect(within(panel).getByText('The prompt changed, here is the new one')).toBeInTheDocument()
     })
 
+    it('refetches when the status epoch changes and never offers the old prompt meanwhile', async () => {
+      const second: Prompt = {
+        ...permission,
+        fingerprint: 'd'.repeat(64),
+        request: 'rm -rf build',
+        options: [{ n: 1, label: 'Allow B', description: null, approving: true }],
+      }
+      let finishRefetch: (response: Response) => void = () => undefined
+      const refetch = new Promise<Response>((resolve) => (finishRefetch = resolve))
+      const fetchOutput = vi
+        .fn()
+        .mockResolvedValueOnce(ok('screen A', false, permission))
+        .mockImplementation(() => refetch.then((response) => response.clone()))
+      const send = vi.fn<Send>()
+      const { rerender } = render(drawer(fetchOutput, send, { status: 'blocked', statusEpoch: 1 }))
+      await screen.findByText('Permission: Bash command')
+      rerender(drawer(fetchOutput, send, { status: 'working', statusEpoch: 2 }))
+      rerender(drawer(fetchOutput, send, { status: 'blocked', statusEpoch: 3 }))
+      expect(screen.queryByText('npm test')).not.toBeInTheDocument()
+      for (const button of screen.queryAllByRole('button', { name: /Yes|No/ })) {
+        expect(button).toBeDisabled()
+      }
+      expect(screen.queryByRole('button', { name: 'Yes' })).not.toBeInTheDocument()
+      finishRefetch(ok('screen B', false, second))
+      expect(await screen.findByText('rm -rf build')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Allow B' })).toBeEnabled()
+      expect(fetchOutput.mock.calls.length).toBeGreaterThanOrEqual(2)
+      expect(send).not.toHaveBeenCalled()
+    })
+
+    it('refetches the output after an unsure outcome', async () => {
+      const user = userEvent.setup()
+      const fetchOutput = vi
+        .fn()
+        .mockResolvedValueOnce(ok('before', false, permission))
+        .mockResolvedValueOnce(ok('after'))
+      const send = vi
+        .fn<Send>()
+        .mockResolvedValue({ kind: 'unsure', message: 'Could not reach Meerkat' })
+      render(drawer(fetchOutput, send))
+      await screen.findByText('before')
+      await user.click(screen.getByRole('button', { name: 'No' }))
+      expect(await screen.findByText('after')).toBeInTheDocument()
+      expect(fetchOutput).toHaveBeenCalledTimes(2)
+    })
+
+    it('shows no panel for a malformed prompt but still shows the output', async () => {
+      const malformed = { kind: 'permission', fingerprint: 'a'.repeat(64), tool: 'Bash' }
+      render(
+        drawer(
+          vi.fn().mockResolvedValue(json({ text: 'screen', truncated: false, prompt: malformed })),
+          vi.fn<Send>()
+        )
+      )
+      expect(await screen.findByText('screen')).toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: 'Reply' })).not.toBeInTheDocument()
+    })
+
     it('hides the panel when a refresh fails, so stale output is never answered', async () => {
       const user = userEvent.setup()
       const fetchOutput = vi

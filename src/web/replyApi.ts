@@ -1,10 +1,11 @@
-import type { Prompt, ReplyRequest } from '../shared/types'
+import type { Prompt, PromptOption, ReplyRequest } from '../shared/types'
 
 export type ReplyResult =
   | { kind: 'sent' }
   | { kind: 'prompt_changed'; prompt: Prompt }
   | { kind: 'reloading' }
   | { kind: 'error'; message: string }
+  | { kind: 'unsure'; message: string }
 
 export interface ReplyEnv {
   fetch: (url: string, init: RequestInit) => Promise<Response>
@@ -47,8 +48,48 @@ function field(body: unknown, name: string): unknown {
   return (body as Record<string, unknown>)[name]
 }
 
-function isPrompt(value: unknown): value is Prompt {
-  return typeof field(value, 'kind') === 'string'
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isOption(value: unknown): value is PromptOption {
+  return (
+    isRecord(value) &&
+    Number.isInteger(value['n']) &&
+    typeof value['label'] === 'string' &&
+    (value['description'] === null || typeof value['description'] === 'string') &&
+    typeof value['approving'] === 'boolean'
+  )
+}
+
+function isOptions(value: unknown): boolean {
+  return Array.isArray(value) && value.every(isOption)
+}
+
+function isWellFormed(value: Record<string, unknown>): boolean {
+  const strings = (...names: string[]) => names.every((name) => typeof value[name] === 'string')
+  switch (value['kind']) {
+    case 'none':
+      return true
+    case 'idle':
+    case 'unrecognized':
+      return strings('fingerprint')
+    case 'permission':
+      return strings('fingerprint', 'tool', 'request', 'question') && isOptions(value['options'])
+    case 'choice':
+      return (
+        strings('fingerprint', 'question') &&
+        (value['header'] === null || typeof value['header'] === 'string') &&
+        (value['freeTextOption'] === null || Number.isInteger(value['freeTextOption'])) &&
+        isOptions(value['options'])
+      )
+    default:
+      return false
+  }
+}
+
+export function parsePrompt(value: unknown): Prompt | null {
+  return isRecord(value) && isWellFormed(value) ? (value as unknown as Prompt) : null
 }
 
 async function readBody(response: Response): Promise<unknown> {
@@ -59,13 +100,16 @@ async function readBody(response: Response): Promise<unknown> {
   }
 }
 
-function herdrMessage(body: unknown): string {
+function herdrResult(body: unknown): ReplyResult {
   const code = String(field(body, 'code') ?? 'unknown')
   const sent = field(body, 'sent')
   if (typeof sent === 'number' && sent > 0) {
-    return `Herdr stopped after ${sent} of the steps (${code}); check the output`
+    return {
+      kind: 'unsure',
+      message: `Herdr stopped after ${sent} of the steps (${code}); check the output`,
+    }
   }
-  return `Herdr refused the input (${code}); nothing was sent`
+  return { kind: 'error', message: `Herdr refused the input (${code}); nothing was sent` }
 }
 
 function resultFor(status: number, body: unknown): ReplyResult {
@@ -73,8 +117,8 @@ function resultFor(status: number, body: unknown): ReplyResult {
   const failed = (message: string): ReplyResult => ({ kind: 'error', message })
   if (status === 200) return { kind: 'sent' }
   if (status === 409 && error === 'prompt_changed') {
-    const prompt = field(body, 'prompt')
-    if (isPrompt(prompt)) return { kind: 'prompt_changed', prompt }
+    const prompt = parsePrompt(field(body, 'prompt'))
+    if (prompt !== null) return { kind: 'prompt_changed', prompt }
   }
   if (status === 409 && error === 'not_waiting') {
     return failed('The session is working again; nothing was sent')
@@ -82,7 +126,7 @@ function resultFor(status: number, body: unknown): ReplyResult {
   if (status === 400) return failed(`Meerkat refused this reply (${String(error)})`)
   if (status === 404) return failed('Session closed')
   if (status === 503) return failed('Herdr is not reachable; nothing was sent')
-  if (status === 502) return failed(herdrMessage(body))
+  if (status === 502) return herdrResult(body)
   if (status === 413) return failed('The reply is too long')
   if (status === 415) return failed('Meerkat refused the request format')
   return failed(`Reply failed (${status})`)
@@ -103,6 +147,10 @@ function reloadOnce(env: ReplyEnv): ReplyResult {
   if (!markReload(env)) return { kind: 'error', message: REFUSED }
   env.reload()
   return { kind: 'reloading' }
+}
+
+export function forgetReloadOnLoad(env: ReplyEnv = browserEnv()): void {
+  if (env.token() !== '') forgetReload(env)
 }
 
 function forgetReload(env: ReplyEnv): void {
@@ -127,7 +175,7 @@ export async function sendReply(
     })
   } catch {
     return {
-      kind: 'error',
+      kind: 'unsure',
       message: 'Could not reach Meerkat; check the output before trying again',
     }
   }

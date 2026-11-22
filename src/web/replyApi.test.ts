@@ -1,6 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Prompt, ReplyRequest } from '../shared/types'
-import { checkReplyText, RELOAD_FLAG, sendReply, type ReplyEnv } from './replyApi'
+import {
+  checkReplyText,
+  forgetReloadOnLoad,
+  parsePrompt,
+  RELOAD_FLAG,
+  sendReply,
+  type ReplyEnv,
+} from './replyApi'
 
 const request: ReplyRequest = {
   replyId: 'abcdef12-3456',
@@ -38,6 +45,11 @@ function env(response: Response | Error) {
   return { value, fetch, reload, store }
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals()
+  document.head.innerHTML = ''
+})
+
 describe('sendReply', () => {
   it('posts exactly the request with the token and JSON content type', async () => {
     const e = env(json({ sent: 1 }, 200))
@@ -59,8 +71,6 @@ describe('sendReply', () => {
     await sendReply('p1', request)
     const headers = fetch.mock.calls[0]?.[1]?.headers as Record<string, string>
     expect(headers['X-Meerkat-Token']).toBe('from-meta')
-    vi.unstubAllGlobals()
-    document.head.innerHTML = ''
   })
 
   it('returns the new prompt for prompt_changed', async () => {
@@ -82,11 +92,6 @@ describe('sendReply', () => {
       { error: 'herdr_error', code: 'agent_blocked', sent: 0 },
       'Herdr refused the input (agent_blocked); nothing was sent',
     ],
-    [
-      502,
-      { error: 'herdr_error', code: 'timeout', sent: 1 },
-      'Herdr stopped after 1 of the steps (timeout); check the output',
-    ],
     [413, { error: 'body_too_large' }, 'The reply is too long'],
     [415, { error: 'unsupported_media' }, 'Meerkat refused the request format'],
     [500, { error: 'boom' }, 'Reply failed (500)'],
@@ -96,10 +101,26 @@ describe('sendReply', () => {
     await expect(sendReply('p1', request, e.value)).resolves.toEqual({ kind: 'error', message })
   })
 
-  it('reports a network failure without claiming nothing was sent', async () => {
-    const e = env(new TypeError('network'))
+  it('reports a partial Herdr send as unsure so the output is refetched', async () => {
+    const e = env(json({ error: 'herdr_error', code: 'timeout', sent: 1 }, 502))
+    await expect(sendReply('p1', request, e.value)).resolves.toEqual({
+      kind: 'unsure',
+      message: 'Herdr stopped after 1 of the steps (timeout); check the output',
+    })
+  })
+
+  it('treats a malformed prompt in prompt_changed as a failure', async () => {
+    const e = env(json({ error: 'prompt_changed', prompt: { kind: 'permission' } }, 409))
     await expect(sendReply('p1', request, e.value)).resolves.toEqual({
       kind: 'error',
+      message: 'Reply failed (409)',
+    })
+  })
+
+  it('reports a network failure as unsure without claiming nothing was sent', async () => {
+    const e = env(new TypeError('network'))
+    await expect(sendReply('p1', request, e.value)).resolves.toEqual({
+      kind: 'unsure',
       message: 'Could not reach Meerkat; check the output before trying again',
     })
   })
@@ -155,5 +176,88 @@ describe('checkReplyText', () => {
   it('allows a newline only where newlines are allowed', () => {
     expect(checkReplyText('one\ntwo', true)).toBeNull()
     expect(checkReplyText('one\ntwo', false)).toBe("Line breaks can't be sent here")
+  })
+})
+
+describe('forgetReloadOnLoad', () => {
+  it('clears the reload flag when the page carries a token', () => {
+    const e = env(json({}, 200))
+    e.store.setItem(RELOAD_FLAG, '1')
+    forgetReloadOnLoad(e.value)
+    expect(e.store.getItem(RELOAD_FLAG)).toBeNull()
+  })
+
+  it('keeps the flag when the token is empty', () => {
+    const e = env(json({}, 200))
+    e.store.setItem(RELOAD_FLAG, '1')
+    forgetReloadOnLoad({ ...e.value, token: () => '' })
+    expect(e.store.getItem(RELOAD_FLAG)).toBe('1')
+  })
+
+  it('does not throw when session storage throws', () => {
+    const e = env(json({}, 200))
+    const broken: ReplyEnv = {
+      ...e.value,
+      storage: () => {
+        throw new Error('blocked')
+      },
+    }
+    expect(() => forgetReloadOnLoad(broken)).not.toThrow()
+  })
+})
+
+describe('parsePrompt', () => {
+  const fingerprint = 'a'.repeat(64)
+  const option = { n: 1, label: 'Yes', description: null, approving: true }
+  const permission = {
+    kind: 'permission',
+    fingerprint,
+    tool: 'Bash command',
+    request: 'npm test',
+    question: 'Proceed?',
+    options: [option],
+  }
+  const choice = {
+    kind: 'choice',
+    fingerprint,
+    header: null,
+    question: 'Which?',
+    options: [{ ...option, approving: false, description: 'd' }],
+    freeTextOption: 2,
+  }
+
+  it.each([
+    permission,
+    choice,
+    { ...choice, header: 'Branch', freeTextOption: null },
+    { kind: 'idle', fingerprint },
+    { kind: 'unrecognized', fingerprint },
+    { kind: 'none' },
+  ])('accepts a well-formed prompt %#', (value) => {
+    expect(parsePrompt(value)).toEqual(value)
+  })
+
+  it.each([
+    null,
+    'permission',
+    [],
+    { kind: 'other', fingerprint },
+    { kind: 'idle' },
+    { kind: 'idle', fingerprint: 3 },
+    { ...permission, options: undefined },
+    { ...permission, options: 'Yes' },
+    { ...permission, tool: undefined },
+    { ...permission, request: 7 },
+    { ...permission, question: null },
+    { ...permission, options: [{ ...option, n: '1' }] },
+    { ...permission, options: [{ ...option, label: null }] },
+    { ...permission, options: [{ ...option, description: 4 }] },
+    { ...permission, options: [{ ...option, approving: 'yes' }] },
+    { ...permission, options: [null] },
+    { ...choice, header: undefined },
+    { ...choice, freeTextOption: '2' },
+    { ...choice, question: undefined },
+  ])('rejects a malformed prompt %#', (value) => {
+    expect(parsePrompt(value)).toBeNull()
   })
 })
