@@ -105,6 +105,28 @@ test.describe('with 60 sessions', () => {
   })
 })
 
+test.describe('with progress reads', () => {
+  test.use({
+    initialReads: {
+      [agents.working.pane_id]:
+        '⏺ Bash(npm test)\n  ⎿  ok\n\n⏺ Tests are green; writing the docs next.\n\n❯ ',
+    },
+  })
+
+  test('shows progress on the card and updates it on status change', async ({ page, meerkat }) => {
+    await page.goto(meerkat.baseURL)
+    const working = column(page, 'Working').getByRole('button', { name: /working-one/ })
+    await expect(working).toContainText('Tests are green; writing the docs next.')
+    await expect(working).toContainText(/updated ≥ \d+s ago/)
+
+    meerkat.fake.setRead(agents.working.pane_id, '⏺ Docs written; all checks pass.')
+    meerkat.fake.pushStatus(agents.working.pane_id, 'done')
+    const attention = column(page, 'Needs attention').getByRole('button', { name: /working-one/ })
+    await expect(attention).toContainText('Docs written; all checks pass.')
+    await expect(attention).toContainText(/updated \d+s ago/)
+  })
+})
+
 test('only read methods reach Herdr', async ({ page, meerkat }) => {
   meerkat.fake.setRead(agents.working.pane_id, 'text')
   await page.goto(meerkat.baseURL)

@@ -11,6 +11,7 @@ import { createSupervisor, type Supervisor, type SupervisorState } from './super
 
 const TIMINGS = { debounceMs: 5, backoffInitialMs: 10, backoffMaxMs: 40, reconcileMs: 200 }
 const HOME = '/Users/u'
+const PROGRESS = { progressIntervalMs: 50 }
 
 const supervisors: Supervisor[] = []
 const fakes: FakeHerdr[] = []
@@ -61,6 +62,13 @@ function paneIds(state: SupervisorState): string[] {
     .sort()
 }
 
+function cardOf(supervisor: Supervisor, paneId: string) {
+  const board = supervisor.current().board
+  return [...board.attention, ...board.working, ...board.idle].find(
+    (card) => card.paneId === paneId
+  )
+}
+
 function subscribedPanes(fake: FakeHerdr, index: number): string[] {
   const subscribes = fake.received.filter((request) => request.method === 'events.subscribe')
   const params = subscribes[index]?.params as { subscriptions: { pane_id?: string }[] }
@@ -103,7 +111,11 @@ describe('supervisor', () => {
     await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
     await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
     expect(paneIds(supervisor.current())).toEqual(['wJ:p1', 'wK:p1'])
-    expect(methods(fake)).toEqual(['session.snapshot', 'events.subscribe', 'session.snapshot'])
+    expect(methods(fake).filter((method) => method !== 'agent.read')).toEqual([
+      'session.snapshot',
+      'events.subscribe',
+      'session.snapshot',
+    ])
     expect(subscribedPanes(fake, 0)).toEqual(['wJ:p1', 'wK:p1'])
   })
 
@@ -271,7 +283,6 @@ describe('supervisor', () => {
     supervisor.onChange((state) => seen.push(state))
     clock = 3000
     await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(4))
-    await new Promise((resolve) => setTimeout(resolve, 30))
     const attention = seen.map((state) => state.board.attention.map((c) => c.paneId))
     expect(attention.every((ids) => ids.includes('wJ:p1'))).toBe(true)
     expect(supervisor.current().board.attention).toEqual([
@@ -479,12 +490,15 @@ describe('supervisor', () => {
   })
 
   it('stop closes the subscription and makes no further requests', async () => {
-    const fake = await startFake()
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'working' })])
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
     const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), {
       reconcileMs: 20,
+      ...PROGRESS,
     })
     supervisor.start()
     await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
+    await vi.waitFor(() => expect(count(fake, 'agent.read')).toBeGreaterThan(1))
     await supervisor.stop()
     const total = fake.received.length
     const connections = fake.connectionCount
@@ -492,6 +506,66 @@ describe('supervisor', () => {
     await new Promise((resolve) => setTimeout(resolve, 80))
     expect(fake.received.length).toBe(total)
     expect(fake.connectionCount).toBe(connections)
+  })
+
+  it('cards get progress after the first snapshot', async () => {
+    const fake = await startFake()
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), PROGRESS)
+    supervisor.start()
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress).toMatchObject({
+        text: 'Halfway there.',
+        sinceIsLowerBound: true,
+      })
+    )
+  })
+
+  it("a working card's progress updates on the interval", async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'working' })])
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), PROGRESS)
+    supervisor.start()
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Halfway there.')
+    )
+    fake.setRead('wJ:p1', '⏺ Almost done.')
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress).toMatchObject({
+        text: 'Almost done.',
+        sinceIsLowerBound: false,
+      })
+    )
+  })
+
+  it('a status change triggers a read of an idle card', async () => {
+    const fake = await startFake()
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), PROGRESS)
+    supervisor.start()
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('Halfway there.')
+    )
+    fake.setRead('wJ:p1', '⏺ All finished.')
+    fake.pushStatus('wJ:p1', 'done')
+    await vi.waitFor(() =>
+      expect(cardOf(supervisor, 'wJ:p1')?.progress?.text).toBe('All finished.')
+    )
+  })
+
+  it('makes no progress reads while Herdr is down and resumes after', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'working' })])
+    fake.setRead('wJ:p1', '⏺ Halfway there.')
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), PROGRESS)
+    supervisor.start()
+    await vi.waitFor(() => expect(count(fake, 'agent.read')).toBeGreaterThan(1))
+    await fake.stop()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('disconnected'))
+    const reads = count(fake, 'agent.read')
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    expect(count(fake, 'agent.read')).toBe(reads)
+    await fake.restart()
+    await vi.waitFor(() => expect(count(fake, 'agent.read')).toBeGreaterThan(reads))
   })
 
   it('stop while Herdr is absent resolves and stops retrying', async () => {

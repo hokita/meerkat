@@ -30,6 +30,7 @@ function boardWith(paneId: string): BoardView {
         status: 'blocked',
         since: 1,
         sinceIsLowerBound: false,
+        progress: null,
       },
     ],
     working: [],

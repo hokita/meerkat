@@ -18,6 +18,7 @@ function card(overrides: Partial<Card> = {}): Card {
     status: 'working',
     since: now - 60_000,
     sinceIsLowerBound: false,
+    progress: null,
     ...overrides,
   }
 }
@@ -71,6 +72,50 @@ describe('Board', () => {
     expect(screen.getByText('1m')).toBeInTheDocument()
     rerender(<Board board={board} now={now + 60_000} stale={false} onOpen={() => {}} />)
     expect(screen.getByText('2m')).toBeInTheDocument()
+  })
+
+  function renderWorking(c: Card, at = now) {
+    const board = { ...empty, working: [c] }
+    const view = render(<Board board={board} now={at} stale={false} onOpen={() => {}} />)
+    return { board, ...view }
+  }
+
+  it('shows the progress sentence and its age', () => {
+    renderWorking(
+      card({
+        progress: { text: 'Parser tests pass.', since: now - 12_000, sinceIsLowerBound: false },
+      })
+    )
+    expect(screen.getByText('Parser tests pass.')).toHaveClass('card-progress')
+    expect(screen.getByText('updated 12s ago')).toBeInTheDocument()
+  })
+
+  it('marks a first-seen age as a lower bound', () => {
+    renderWorking(
+      card({ progress: { text: 'Working.', since: now - 180_000, sinceIsLowerBound: true } })
+    )
+    expect(screen.getByText('updated ≥ 3m ago')).toBeInTheDocument()
+  })
+
+  it('shows nothing extra without progress', () => {
+    const { container } = renderWorking(card({ progress: null }))
+    expect(screen.queryByText(/^updated /)).toBeNull()
+    expect(container.querySelector('.card-progress')).toBeNull()
+  })
+
+  it('renders progress text as text, not HTML', () => {
+    const { container } = renderWorking(
+      card({ progress: { text: '<b>x</b>', since: now, sinceIsLowerBound: false } })
+    )
+    expect(screen.getByText('<b>x</b>')).toBeInTheDocument()
+    expect(container.querySelector('.card b')).toBeNull()
+  })
+
+  it('ticks the progress age with now', () => {
+    const c = card({ progress: { text: 'Going.', since: now, sinceIsLowerBound: false } })
+    const { board, rerender } = renderWorking(c)
+    rerender(<Board board={board} now={now + 60_000} stale={false} onOpen={() => {}} />)
+    expect(screen.getByText('updated 1m ago')).toBeInTheDocument()
   })
 
   it('calls onOpen on click and on Enter', async () => {

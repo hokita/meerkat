@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentStatus } from '../shared/types.js'
-import { applyStatusEvent, boardFromSnapshot, columnOf, repoName, toView } from './board.js'
+import {
+  applyProgress,
+  applyStatusEvent,
+  boardFromSnapshot,
+  columnOf,
+  repoName,
+  toView,
+} from './board.js'
 import type { HerdrAgent, HerdrSnapshot } from './herdr/protocol.js'
 
 const HOME = '/Users/u'
@@ -82,6 +89,7 @@ describe('boardFromSnapshot', () => {
       status: 'working',
       since: 1000,
       sinceIsLowerBound: true,
+      progress: null,
     })
   })
 
@@ -197,5 +205,64 @@ describe('toView', () => {
     expect(view.attention.map((c) => c.paneId)).toEqual(['a2', 'a1'])
     expect(view.working.map((c) => c.paneId)).toEqual(['w2', 'w1'])
     expect(view.idle.map((c) => c.paneId)).toEqual(['i3', 'i4', 'i2', 'i1'])
+  })
+})
+
+describe('applyProgress', () => {
+  const state = boardFromSnapshot(null, snapshot([agent('p1', 'working')]), 1000, HOME)
+
+  it('new cards start with no progress', () => {
+    expect(state.cards.get('p1')?.progress).toBeNull()
+  })
+
+  it('first progress is a lower bound', () => {
+    const next = applyProgress(state, 'p1', 'hello', 2000)
+    expect(next.cards.get('p1')?.progress).toEqual({
+      text: 'hello',
+      since: 2000,
+      sinceIsLowerBound: true,
+    })
+  })
+
+  it('same text keeps since and returns the same state object', () => {
+    const first = applyProgress(state, 'p1', 'hello', 2000)
+    const second = applyProgress(first, 'p1', 'hello', 9000)
+    expect(second).toBe(first)
+    expect(second.cards.get('p1')?.progress?.since).toBe(2000)
+  })
+
+  it('changed text resets since exactly', () => {
+    const first = applyProgress(state, 'p1', 'hello', 2000)
+    const second = applyProgress(first, 'p1', 'world', 5000)
+    expect(second.cards.get('p1')?.progress).toEqual({
+      text: 'world',
+      since: 5000,
+      sinceIsLowerBound: false,
+    })
+  })
+
+  it('unknown pane is ignored', () => {
+    expect(applyProgress(state, 'nope', 'hello', 2000)).toBe(state)
+  })
+
+  it('snapshot keeps progress of existing cards and drops removed ones', () => {
+    const withProgress = applyProgress(
+      applyProgress(state, 'p1', 'hello', 2000),
+      'p1',
+      'hello',
+      2500
+    )
+    const both = boardFromSnapshot(
+      withProgress,
+      snapshot([agent('p1', 'working'), agent('p2', 'idle')]),
+      3000,
+      HOME
+    )
+    const expected = { text: 'hello', since: 2000, sinceIsLowerBound: true }
+    expect(both.cards.get('p1')?.progress).toEqual(expected)
+    const evented = applyStatusEvent(both, { paneId: 'p1', status: 'done' }, 4000)
+    expect(evented.cards.get('p1')?.progress).toEqual(expected)
+    const dropped = boardFromSnapshot(evented, snapshot([agent('p2', 'idle')]), 5000, HOME)
+    expect([...dropped.cards.keys()]).toEqual(['p2'])
   })
 })

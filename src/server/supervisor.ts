@@ -1,5 +1,11 @@
 import type { AgentStatus, BoardView, HerdrConnection } from '../shared/types.js'
-import { applyStatusEvent, boardFromSnapshot, toView, type BoardState } from './board.js'
+import {
+  applyProgress,
+  applyStatusEvent,
+  boardFromSnapshot,
+  toView,
+  type BoardState,
+} from './board.js'
 import type { HerdrClient, HerdrSubscription } from './herdr/client.js'
 import {
   parseSnapshotResponse,
@@ -7,6 +13,8 @@ import {
   subscribeParams,
   type HerdrSnapshot,
 } from './herdr/protocol.js'
+import { createProgressPoller } from './progress-poller.js'
+import { readProgress } from './progress.js'
 
 export interface SupervisorState {
   herdr: HerdrConnection
@@ -28,6 +36,7 @@ export interface SupervisorOptions {
   reconcileMs?: number
   backoffInitialMs?: number
   backoffMaxMs?: number
+  progressIntervalMs?: number
   log?: (message: string) => void
 }
 
@@ -87,7 +96,21 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   let sleepTimer: NodeJS.Timeout | null = null
   let sleepDone: (() => void) | null = null
 
+  const poller = createProgressPoller({
+    read: (paneId) => readProgress(client, paneId),
+    onProgress: (paneId, text) => {
+      board = applyProgress(board, paneId, text, now())
+      publish()
+    },
+    intervalMs: opts.progressIntervalMs,
+  })
+
   function publish(): void {
+    poller.sync(
+      herdr === 'connected'
+        ? [...board.cards.values()].map((card) => ({ paneId: card.paneId, status: card.status }))
+        : []
+    )
     state = { herdr, board: toView(board) }
     const next = JSON.stringify(state)
     if (next === serialized) return
@@ -297,10 +320,11 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
     },
     async stop() {
       stopped = true
+      const pollerStopped = poller.stop()
       clearTimers()
       closeSubscription()
       signal()
-      await running
+      await Promise.all([running, pollerStopped])
     },
     current() {
       return state
