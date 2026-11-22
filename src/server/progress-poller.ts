@@ -23,6 +23,7 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
   let known = new Map<string, AgentStatus>()
   const queue = new Set<string>()
   let reading: string | null = null
+  let draining = false
   let stopped = false
 
   async function readOrNull(paneId: string): Promise<string | null> {
@@ -33,19 +34,32 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
     }
   }
 
+  function deliver(paneId: string, text: string): void {
+    try {
+      opts.onProgress(paneId, text)
+    } catch {
+      return
+    }
+  }
+
   async function drain(): Promise<void> {
-    if (reading !== null) return
-    while (!stopped) {
-      const next = queue.values().next()
-      if (next.done) return
-      const paneId = next.value
-      queue.delete(paneId)
-      if (!known.has(paneId)) continue
-      reading = paneId
-      const text = await readOrNull(paneId)
-      reading = null
-      if (stopped) return
-      if (text !== null && known.has(paneId)) opts.onProgress(paneId, text)
+    if (draining) return
+    draining = true
+    try {
+      while (!stopped) {
+        const next = queue.values().next()
+        if (next.done) return
+        const paneId = next.value
+        queue.delete(paneId)
+        if (!known.has(paneId)) continue
+        reading = paneId
+        const text = await readOrNull(paneId)
+        reading = null
+        if (stopped) return
+        if (text !== null && known.has(paneId)) deliver(paneId, text)
+      }
+    } finally {
+      draining = false
     }
   }
 

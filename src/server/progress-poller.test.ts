@@ -197,4 +197,100 @@ describe('createProgressPoller', () => {
     expect(progress).toEqual([])
     expect(calls).toEqual(['a'])
   })
+
+  it('keeps one read in flight when onProgress re-syncs with a changed status', async () => {
+    const calls: string[] = []
+    const pending: Deferred[] = []
+    let inFlight = 0
+    let maxInFlight = 0
+    let resynced = false
+    const poller: ProgressPoller = createProgressPoller({
+      read: async (paneId) => {
+        calls.push(paneId)
+        inFlight += 1
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        const d = deferred()
+        pending.push(d)
+        try {
+          return await d.promise
+        } finally {
+          inFlight -= 1
+        }
+      },
+      onProgress: () => {
+        if (resynced) return
+        resynced = true
+        poller.sync([
+          { paneId: 'a', status: 'done' },
+          { paneId: 'b', status: 'working' },
+        ])
+      },
+    })
+    active = poller
+    poller.sync([{ paneId: 'a', status: 'working' }])
+    await settle()
+    pending[0]!.resolve('first')
+    await settle()
+    expect(maxInFlight).toBe(1)
+    expect(calls).toEqual(['a', 'a'])
+    pending[1]!.resolve('second')
+    await settle()
+    expect(calls).toEqual(['a', 'a', 'b'])
+    pending[2]!.resolve('third')
+    await settle()
+    expect(maxInFlight).toBe(1)
+    expect(calls).toEqual(['a', 'a', 'b'])
+  })
+
+  it('survives a throwing onProgress without an unhandled rejection', async () => {
+    const calls: string[] = []
+    const pending: Deferred[] = []
+    const unhandled: unknown[] = []
+    const record = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', record)
+    try {
+      const poller = createProgressPoller({
+        read: (paneId) => {
+          calls.push(paneId)
+          const d = deferred()
+          pending.push(d)
+          return d.promise
+        },
+        onProgress: () => {
+          throw new Error('listener failed')
+        },
+      })
+      active = poller
+      poller.sync([
+        { paneId: 'a', status: 'working' },
+        { paneId: 'b', status: 'working' },
+      ])
+      await settle()
+      pending[0]!.resolve('x')
+      await settle()
+      expect(calls).toEqual(['a', 'b'])
+      pending[1]!.resolve('y')
+      await settle()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', record)
+    }
+  })
+
+  it('reads a pane again when its status changes during its read', async () => {
+    const { poller, calls, pending } = setup()
+    active = poller
+    poller.sync([{ paneId: 'a', status: 'working' }])
+    await settle()
+    poller.sync([{ paneId: 'a', status: 'done' }])
+    await settle()
+    expect(calls).toEqual(['a'])
+    pending[0]!.resolve('stale')
+    await settle()
+    expect(calls).toEqual(['a', 'a'])
+    pending[1]!.resolve('fresh')
+    await settle()
+    expect(calls).toEqual(['a', 'a'])
+  })
 })
