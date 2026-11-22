@@ -1,4 +1,4 @@
-import type { BoardView, HerdrConnection } from '../shared/types.js'
+import type { AgentStatus, BoardView, HerdrConnection } from '../shared/types.js'
 import { applyStatusEvent, boardFromSnapshot, toView, type BoardState } from './board.js'
 import type { HerdrClient, HerdrSubscription } from './herdr/client.js'
 import {
@@ -32,6 +32,13 @@ export interface SupervisorOptions {
 }
 
 class StreamFailure extends Error {}
+
+interface ReceivedStatus {
+  paneId: string
+  status: AgentStatus
+  title?: string | null
+  receivedAt: number
+}
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -72,6 +79,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   let streamFailed = false
   let snapshotInFlight = false
   let eventsDuringSnapshot = false
+  let statusesDuringSnapshot: ReceivedStatus[] = []
   let wake: (() => void) | null = null
   let debounceTimer: NodeJS.Timeout | null = null
   let reconcileTimer: NodeJS.Timeout | null = null
@@ -165,15 +173,20 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
       debounceTimer = null
     }
     eventsDuringSnapshot = false
+    statusesDuringSnapshot = []
     snapshotInFlight = true
     let snapshot: HerdrSnapshot
+    let received: ReceivedStatus[]
     try {
       snapshot = parseSnapshotResponse(await client.request('session.snapshot', {}))
     } finally {
       snapshotInFlight = false
+      received = statusesDuringSnapshot
+      statusesDuringSnapshot = []
     }
     if (stopped) return snapshot
     board = boardFromSnapshot(board, snapshot, now(), home)
+    for (const status of received) board = applyStatusEvent(board, status, status.receivedAt)
     herdr = 'connected'
     outageLogged = false
     armReconcile()
@@ -191,7 +204,9 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
       }
       if (item.kind === 'status') {
         if (board.cards.has(item.paneId)) {
-          board = applyStatusEvent(board, item, now())
+          const receivedAt = now()
+          if (snapshotInFlight) statusesDuringSnapshot.push({ ...item, receivedAt })
+          board = applyStatusEvent(board, item, receivedAt)
           publish()
         } else {
           scheduleSnapshot()

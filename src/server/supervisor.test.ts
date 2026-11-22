@@ -241,6 +241,44 @@ describe('supervisor', () => {
     )
   })
 
+  it('does not let an older in-flight snapshot undo a status event received meanwhile', async () => {
+    const fake = await startFake()
+    let clock = 1000
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }), {
+      reconcileMs: 60000,
+      now: () => clock,
+    })
+    supervisor.start()
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(2))
+    fake.setSnapshotDelay(100)
+    fake.pushRaw('{"event":"pane_created","data":{}}')
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(3))
+    clock = 2000
+    fake.pushStatus('wJ:p1', 'done')
+    await vi.waitFor(() =>
+      expect(supervisor.current().board.attention.map((c) => c.paneId)).toEqual(['wJ:p1'])
+    )
+    fake.setSnapshotDelay(0)
+    fake.setSnapshot(
+      fakeSnapshot({
+        agents: [
+          fakeAgent({ pane_id: 'wJ:p1', agent_status: 'done' }),
+          fakeAgent({ pane_id: 'wK:p1' }),
+        ],
+      })
+    )
+    const seen: SupervisorState[] = []
+    supervisor.onChange((state) => seen.push(state))
+    clock = 3000
+    await vi.waitFor(() => expect(count(fake, 'session.snapshot')).toBe(4))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const attention = seen.map((state) => state.board.attention.map((c) => c.paneId))
+    expect(attention.every((ids) => ids.includes('wJ:p1'))).toBe(true)
+    expect(supervisor.current().board.attention).toEqual([
+      expect.objectContaining({ paneId: 'wJ:p1', since: 2000, sinceIsLowerBound: false }),
+    ])
+  })
+
   it('recovers after Herdr restarts mid-stream', async () => {
     const fake = await startFake()
     const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
