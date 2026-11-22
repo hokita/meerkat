@@ -2,7 +2,7 @@
 
 A small local web app that answers one question at a glance: what needs my attention? It shows your
 [Herdr](https://herdr.dev) agent sessions in three live columns (Needs attention, Working, Idle) and
-opens the last lines of a session's output on demand.
+opens the last lines of a session's output on demand. It can also reply to a session.
 
 ## Run
 
@@ -23,12 +23,23 @@ Each card shows the session's latest update and how long ago it changed.
 | `MEERKAT_PORT`         | `4321`                       | Port, an integer from 1-65535 |
 | `MEERKAT_HERDR_SOCKET` | `~/.config/herdr/herdr.sock` | Herdr API socket              |
 
+## Reply from the board
+
+Meerkat can answer a session from its drawer. It understands Claude Code choice lists, permission
+prompts (any approving option asks for a confirm step first) and a session waiting at its prompt. For
+anything else it shows the output, a keypad (1-9, Enter, Esc) and a text box.
+
+Answering a worker from Meerkat skips the orchestrator's relay. The card shows `... from Meerkat`
+after a reply.
+
 ## Promises
 
-Read-only. The Herdr client sends only `session.snapshot`, `events.subscribe`, `events.wait`,
-`agent.list`, `agent.get` and `agent.read`. Any other method is refused before a socket is opened.
-A unit test tries every mutating method (`agent.prompt`, `agent.start`, `agent.send_keys`,
-`pane.close`, `pane.split`, `pane.focus`, `server.stop`, ...).
+Meerkat sends input only through the reply endpoint, and only after it re-reads the screen. The Herdr
+client sends the read methods `session.snapshot`, `events.subscribe`, `events.wait`, `agent.list`,
+`agent.get` and `agent.read`, plus exactly three that change things: `agent.prompt`,
+`agent.send_keys` and `pane.send_text`. Every other mutating method (`agent.start`, `pane.close`,
+`pane.split`, `pane.focus`, `server.stop`, ...) is refused before a socket is opened. A unit test
+tries every method in the Herdr schema.
 
 Localhost only, Mac only:
 
@@ -36,12 +47,14 @@ Localhost only, Mac only:
 - A request whose `Host` header is not exactly `localhost:<port>` or `127.0.0.1:<port>` gets
   `421 Misdirected Request`, which stops DNS rebinding.
 - No CORS headers are ever sent, so other websites cannot read responses.
-- Only `GET` is served; anything else gets `405`.
+- Replies are `POST`s that need a per-launch token, embedded in the page and sent back in the
+  `X-Meerkat-Token` header, and a matching `Origin`. The page cannot be framed.
+- Other methods get `405`.
 
 Tests in `src/server/http.test.ts` cover the Host check, the absence of CORS headers and the method
 check. The allow-list tests live beside the Herdr client in `src/server/herdr/`.
 
-Not included: phone access, sign-in, sending input to agents, notifications, auto-start, deploys.
+Not included: phone access, sign-in, notifications, auto-start, deploys.
 
 ## Develop
 

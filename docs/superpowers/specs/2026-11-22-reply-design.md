@@ -254,7 +254,7 @@ No send sequence and no confirm rule changed. Every `Yes…` option seen (`Yes, 
   the params itself (no pass-through objects) and is constructed only in `main.ts` and handed only to the reply
   route. Keys are checked against a closed list `1`–`9`, `enter`, `esc` **(my call: also `up`/`down` only if
   the builder finds digits don't select in Claude Code)**.
-- Tests: every one of the 109 schema methods is tried on both paths; exactly 6 pass `request`, exactly 3 pass
+- Tests: every one of the 102 schema methods is tried on both paths; exactly 6 pass `request`, exactly 3 pass
   `ReplySender`, none pass both. `server.stop`, `pane.close`, `agent.start`, `pane.run`, `pane.send_keys`,
   `pane.send_input`, `agent.focus`, … are named explicitly. e2e: the fake Herdr records every method; a test
   drives each reply kind and asserts only these 9 methods were ever received.
