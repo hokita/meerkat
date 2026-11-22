@@ -10,7 +10,10 @@ import { createReplyMemory, serveReply, type ReplyDeps } from './reply.js'
 import type { Supervisor, SupervisorState } from './supervisor.js'
 
 export interface HttpServerOptions {
-  supervisor: Pick<Supervisor, 'current' | 'onChange' | 'card' | 'recordReply' | 'refreshProgress'>
+  supervisor: Pick<
+    Supervisor,
+    'current' | 'onChange' | 'card' | 'recordReply' | 'markSent' | 'refreshProgress'
+  >
   client: HerdrClient
   sender: ReplySender
   port: number

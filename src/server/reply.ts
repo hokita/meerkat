@@ -19,7 +19,7 @@ export interface ReplyMemory {
 }
 
 export interface ReplyDeps {
-  supervisor: Pick<Supervisor, 'current' | 'recordReply' | 'refreshProgress'>
+  supervisor: Pick<Supervisor, 'current' | 'recordReply' | 'markSent' | 'refreshProgress'>
   read: (paneId: string) => Promise<PromptRead | 'gone'>
   sender: ReplySender
   memory: ReplyMemory
@@ -204,6 +204,7 @@ function bestEffort(task: () => void): void {
 
 function afterSend(deps: ReplyDeps, paneId: string, outcome: Outcome): void {
   const { summary } = outcome
+  if (outcome.sent > 0) bestEffort(() => deps.supervisor.markSent(paneId))
   if (summary !== null) bestEffort(() => deps.supervisor.recordReply(paneId, summary))
   if (outcome.sent > 0) bestEffort(() => deps.supervisor.refreshProgress(paneId))
 }

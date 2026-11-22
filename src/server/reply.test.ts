@@ -77,6 +77,7 @@ function setup(opts: SetupOptions = {}) {
   const reads: string[] = []
   const replies: Array<[string, string]> = []
   const refreshed: string[] = []
+  const bookkeeping: string[] = []
   let clock = 1_000_000
   let gate = opts.gate
 
@@ -100,7 +101,12 @@ function setup(opts: SetupOptions = {}) {
       }),
       recordReply: (paneId, summary) => {
         replies.push([paneId, summary])
+        bookkeeping.push(`reply ${paneId}`)
         if (opts.bookkeepingThrows === true) throw new Error('record failed')
+      },
+      markSent: (paneId) => {
+        bookkeeping.push(`sent ${paneId}`)
+        if (opts.bookkeepingThrows === true) throw new Error('mark failed')
       },
       refreshProgress: (paneId) => {
         refreshed.push(paneId)
@@ -128,6 +134,7 @@ function setup(opts: SetupOptions = {}) {
     reads,
     replies,
     refreshed,
+    bookkeeping,
     advance(ms: number) {
       clock += ms
     },
@@ -364,6 +371,32 @@ describe('handleReply Herdr errors', () => {
       body: { error: 'herdr_error', code: 'timeout', sent: 0 },
     })
     expect(t.calls).toEqual([])
+  })
+})
+
+describe('handleReply marks sends', () => {
+  it('bumps the epoch before recording the reply after a successful send', async () => {
+    const t = setup({ screens: [permission] })
+    await handleReply(t.deps, PANE, request({ type: 'option', n: 1 }))
+    expect(t.bookkeeping).toEqual([`sent ${PANE}`, `reply ${PANE}`])
+  })
+
+  it('bumps the epoch after a partial send without recording a reply', async () => {
+    const t = setup({
+      screens: [choice],
+      failAt: { step: 2, error: new HerdrProtocolError('pane_not_found', 'gone') },
+    })
+    await handleReply(t.deps, PANE, request({ type: 'freeText', text: 'hi' }))
+    expect(t.bookkeeping).toEqual([`sent ${PANE}`])
+  })
+
+  it('does not bump the epoch when nothing was sent', async () => {
+    const t = setup({
+      screens: [idle],
+      failAt: { step: 1, error: new HerdrProtocolError('agent_blocked', 'blocked') },
+    })
+    await handleReply(t.deps, PANE, request({ type: 'prompt', text: 'go' }))
+    expect(t.bookkeeping).toEqual([])
   })
 })
 

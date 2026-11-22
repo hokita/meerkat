@@ -4,6 +4,7 @@ import {
   applyReply,
   applyStatusEvent,
   boardFromSnapshot,
+  bumpEpoch,
   expireReplies,
   toView,
   type BoardState,
@@ -29,6 +30,7 @@ export interface Supervisor {
   current(): SupervisorState
   card(paneId: string): Card | undefined
   recordReply(paneId: string, summary: string): void
+  markSent(paneId: string): void
   refreshProgress(paneId: string): void
   onChange(listener: (state: SupervisorState) => void): () => void
 }
@@ -346,6 +348,11 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
     recordReply(paneId, summary) {
       if (!board.cards.has(paneId)) return
       board = applyReply(board, paneId, summary, now())
+      publish()
+    },
+    markSent(paneId) {
+      if (!board.cards.has(paneId)) return
+      board = bumpEpoch(board, paneId)
       publish()
     },
     refreshProgress(paneId) {

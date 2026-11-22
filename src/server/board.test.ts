@@ -5,6 +5,7 @@ import {
   applyReply,
   applyStatusEvent,
   boardFromSnapshot,
+  bumpEpoch,
   columnOf,
   expireReplies,
   repoName,
@@ -377,5 +378,22 @@ describe('replies', () => {
     expect(expireReplies(replied, 2000 + 599_999)).toBe(replied)
     const expired = expireReplies(replied, 2000 + 600_000)
     expect(expired.cards.get('p1')?.lastReply).toBeNull()
+  })
+
+  it('bumpEpoch gives the card the next counter value and keeps its reply', () => {
+    const replied = applyReply(blocked, 'p1', 'Yes', 2000)
+    const bumped = bumpEpoch(replied, 'p1')
+    expect(bumped.cards.get('p1')?.statusEpoch).toBe(replied.nextEpoch)
+    expect(bumped.nextEpoch).toBe(replied.nextEpoch + 1)
+    expect(bumped.cards.get('p1')?.lastReply).toEqual(replied.cards.get('p1')?.lastReply)
+    expect(bumped.cards.get('p1')?.since).toBe(replied.cards.get('p1')?.since)
+    expect(bumpEpoch(replied, 'nope')).toBe(replied)
+  })
+
+  it('a snapshot with the same status after a bump keeps the reply', () => {
+    const bumped = bumpEpoch(applyReply(blocked, 'p1', 'Yes', 2000), 'p1')
+    const next = boardFromSnapshot(bumped, snapshot([agent('p1', 'blocked')]), 2200, HOME)
+    expect(next.cards.get('p1')?.lastReply).not.toBeNull()
+    expect(next.cards.get('p1')?.statusEpoch).toBe(bumped.cards.get('p1')?.statusEpoch)
   })
 })

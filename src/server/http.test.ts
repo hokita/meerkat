@@ -55,6 +55,7 @@ interface Stub {
   replies: Array<[string, string]>
   refreshed: string[]
   recordReply(paneId: string, summary: string): void
+  markSent(paneId: string): void
   refreshProgress(paneId: string): void
 }
 
@@ -85,6 +86,21 @@ function stubSupervisor(state: SupervisorState): Stub {
     refreshed: [],
     recordReply(paneId, summary) {
       stub.replies.push([paneId, summary])
+    },
+    markSent(paneId) {
+      const bump = (cards: Card[]) =>
+        cards.map((card) =>
+          card.paneId === paneId ? { ...card, statusEpoch: card.statusEpoch + 1 } : card
+        )
+      const { board } = stub.state
+      stub.state = {
+        ...stub.state,
+        board: {
+          attention: bump(board.attention),
+          working: bump(board.working),
+          idle: bump(board.idle),
+        },
+      }
     },
     refreshProgress(paneId) {
       stub.refreshed.push(paneId)
@@ -538,6 +554,28 @@ describe('POST /api/sessions/:id/reply', () => {
       action: { type: 'option', n: 1 },
     })
     expect(JSON.parse(again.body)).toEqual({ sent: 1 })
+    expect(sends(h)).toEqual(['agent.send_keys'])
+  })
+
+  it('refuses the first fingerprint after a send even when the screen is the same', async () => {
+    const h = await outputHarness('w2:p1')
+    h.fake.setRead('w2:p1', screen('permission-bash.txt'))
+    const output = JSON.parse((await get(h, '/api/sessions/w2:p1/output')).body) as {
+      prompt: { fingerprint: string }
+    }
+    const first = await post(h, 'w2:p1', {
+      replyId: 'reply-0001',
+      fingerprint: output.prompt.fingerprint,
+      action: { type: 'option', n: 1 },
+    })
+    expect(first.status).toBe(200)
+    const second = await post(h, 'w2:p1', {
+      replyId: 'reply-0002',
+      fingerprint: output.prompt.fingerprint,
+      action: { type: 'option', n: 1 },
+    })
+    expect(second.status).toBe(409)
+    expect((JSON.parse(second.body) as { error: string }).error).toBe('prompt_changed')
     expect(sends(h)).toEqual(['agent.send_keys'])
   })
 

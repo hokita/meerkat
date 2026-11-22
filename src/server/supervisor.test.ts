@@ -509,6 +509,23 @@ describe('supervisor', () => {
     await vi.waitFor(() => expect(supervisor.card('wJ:p1')?.lastReply).toBeNull())
   })
 
+  it('markSent bumps the card epoch, keeps the reply and publishes', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')).toBeDefined())
+    supervisor.recordReply('wJ:p1', 'Yes')
+    const before = supervisor.card('wJ:p1')?.statusEpoch ?? -1
+    const published: unknown[] = []
+    supervisor.onChange((state) => published.push(state))
+    supervisor.markSent('wJ:p1')
+    expect(supervisor.card('wJ:p1')?.statusEpoch).toBeGreaterThan(before)
+    expect(supervisor.card('wJ:p1')?.lastReply?.summary).toBe('Yes')
+    expect(published).toHaveLength(1)
+    supervisor.markSent('nope')
+    expect(published).toHaveLength(1)
+  })
+
   it('does not publish a reply for an unknown pane', async () => {
     const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
     const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))

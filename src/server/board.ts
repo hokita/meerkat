@@ -68,7 +68,7 @@ export function boardFromSnapshot(
       statusEpoch: unchanged ? previous.statusEpoch : nextEpoch++,
       lastReply: previous?.lastReply ?? null,
     }
-    cards.set(agent.paneId, withoutSupersededReply(card))
+    cards.set(agent.paneId, unchanged ? card : withoutSupersededReply(card))
   }
   return { cards, nextEpoch }
 }
@@ -127,6 +127,14 @@ export function applyReply(
   const cards = new Map(state.cards)
   cards.set(paneId, { ...card, lastReply: { summary, at: now, epoch: card.statusEpoch } })
   return { ...state, cards }
+}
+
+export function bumpEpoch(state: BoardState, paneId: string): BoardState {
+  const card = state.cards.get(paneId)
+  if (card === undefined) return state
+  const cards = new Map(state.cards)
+  cards.set(paneId, { ...card, statusEpoch: state.nextEpoch })
+  return { cards, nextEpoch: state.nextEpoch + 1 }
 }
 
 export function expireReplies(state: BoardState, now: number): BoardState {
