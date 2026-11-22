@@ -16,14 +16,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   tseslint.configs.recommended,
   {
-    files: [
-      'src/server/**',
-      'src/shared/**',
-      'test-support/**',
-      'e2e/**',
-      'scripts/**',
-      '*.config.ts',
-    ],
+    files: ['src/server/**', 'src/shared/**', 'test-support/**', 'e2e/**', '*.config.ts'],
     languageOptions: { globals: globals.node },
   },
   {

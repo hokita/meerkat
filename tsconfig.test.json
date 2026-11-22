@@ -7,10 +7,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": [
-    "src/server/**/*.test.ts",
-    "scripts/**/*.test.ts",
-    "test-support/**/*.ts",
-    "e2e/**/*.ts"
-  ]
+  "include": ["src/server/**/*.test.ts", "test-support/**/*.ts", "e2e/**/*.ts"]
 }

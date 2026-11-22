@@ -18,13 +18,6 @@ export default defineConfig({
           setupFiles: ['src/web/test-setup.ts'],
         },
       },
-      {
-        test: {
-          name: 'scripts',
-          environment: 'node',
-          include: ['scripts/**/*.test.ts'],
-        },
-      },
     ],
     passWithNoTests: true,
   },
