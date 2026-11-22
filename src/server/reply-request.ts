@@ -1,17 +1,4 @@
-import { REPLY_KEYS, type ReplyKey } from './herdr/reply-sender.js'
-
-export type ReplyAction =
-  | { type: 'option'; n: number }
-  | { type: 'freeText'; text: string }
-  | { type: 'prompt'; text: string }
-  | { type: 'keys'; keys: ReplyKey[] }
-  | { type: 'text'; text: string }
-
-export interface ReplyRequest {
-  replyId: string
-  fingerprint: string
-  action: ReplyAction
-}
+import { REPLY_KEYS, type ReplyAction, type ReplyKey, type ReplyRequest } from '../shared/types.js'
 
 const REPLY_ID = /^[A-Za-z0-9-]{8,64}$/
 const FINGERPRINT = /^[0-9a-f]{64}$/

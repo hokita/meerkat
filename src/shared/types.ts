@@ -60,3 +60,20 @@ export type RecognizedPrompt =
 
 export type Prompt =
   (Exclude<RecognizedPrompt, { kind: 'none' }> & { fingerprint: string }) | { kind: 'none' }
+
+export const REPLY_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'enter', 'esc'] as const
+
+export type ReplyKey = (typeof REPLY_KEYS)[number]
+
+export type ReplyAction =
+  | { type: 'option'; n: number }
+  | { type: 'freeText'; text: string }
+  | { type: 'prompt'; text: string }
+  | { type: 'keys'; keys: ReplyKey[] }
+  | { type: 'text'; text: string }
+
+export interface ReplyRequest {
+  replyId: string
+  fingerprint: string
+  action: ReplyAction
+}

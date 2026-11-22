@@ -1,10 +1,7 @@
+import { REPLY_KEYS, type ReplyKey } from '../../shared/types.js'
 import { assertReplyAllowed } from './allowlist.js'
 import { requestLine } from './client.js'
 import { HerdrProtocolError, parseReplyResult } from './protocol.js'
-
-export const REPLY_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'enter', 'esc'] as const
-
-export type ReplyKey = (typeof REPLY_KEYS)[number]
 
 export interface ReplySender {
   prompt(paneId: string, text: string): Promise<void>

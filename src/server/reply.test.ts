@@ -2,7 +2,8 @@ import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import type { HerdrConnection, Prompt } from '../shared/types.js'
 import { HerdrProtocolError } from './herdr/protocol.js'
-import type { ReplyKey, ReplySender } from './herdr/reply-sender.js'
+import type { ReplyKey } from '../shared/types.js'
+import type { ReplySender } from './herdr/reply-sender.js'
 import type { PromptRead } from './read-prompt.js'
 import {
   MAX_BODY_BYTES,

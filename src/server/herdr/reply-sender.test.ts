@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { fakeSnapshot, startFakeHerdr, type FakeHerdr } from '../../../test-support/fake-herdr.js'
 import { HerdrProtocolError } from './protocol.js'
-import { createReplySender, type ReplyKey } from './reply-sender.js'
+import type { ReplyKey } from '../../shared/types.js'
+import { createReplySender } from './reply-sender.js'
 
 let fake: FakeHerdr | null = null
 

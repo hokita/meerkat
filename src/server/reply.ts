@@ -1,13 +1,11 @@
 import type { Readable } from 'node:stream'
-import type { Prompt } from '../shared/types.js'
+import { REPLY_KEYS, type Prompt, type ReplyAction, type ReplyKey } from '../shared/types.js'
 import { HerdrProtocolError } from './herdr/protocol.js'
-import { REPLY_KEYS, type ReplyKey, type ReplySender } from './herdr/reply-sender.js'
+import type { ReplySender } from './herdr/reply-sender.js'
 import { paneIdFromSegment } from './pane-id.js'
 import type { PromptRead } from './read-prompt.js'
-import { parseReplyRequest, type ReplyAction } from './reply-request.js'
+import { parseReplyRequest } from './reply-request.js'
 import type { Supervisor } from './supervisor.js'
-
-export type { ReplyAction, ReplyRequest } from './reply-request.js'
 
 export interface ReplyResult {
   status: number
