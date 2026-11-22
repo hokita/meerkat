@@ -509,6 +509,30 @@ describe('supervisor', () => {
     await vi.waitFor(() => expect(supervisor.card('wJ:p1')?.lastReply).toBeNull())
   })
 
+  it('does not publish a reply for an unknown pane', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')).toBeDefined())
+    const published: unknown[] = []
+    supervisor.onChange((state) => published.push(state))
+    supervisor.recordReply('nope', 'Yes')
+    expect(published).toHaveLength(0)
+  })
+
+  it('keeps status epochs increasing across an observation gap', async () => {
+    const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'blocked' })])
+    const supervisor = supervise(createHerdrClient({ socketPath: fake.socketPath }))
+    supervisor.start()
+    await vi.waitFor(() => expect(supervisor.card('wJ:p1')).toBeDefined())
+    const before = supervisor.card('wJ:p1')?.statusEpoch ?? -1
+    await fake.stop()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('disconnected'))
+    await fake.restart()
+    await vi.waitFor(() => expect(supervisor.current().herdr).toBe('connected'))
+    expect(supervisor.card('wJ:p1')?.statusEpoch).toBeGreaterThan(before)
+  })
+
   it('stop closes the subscription and makes no further requests', async () => {
     const fake = await startFake([fakeAgent({ pane_id: 'wJ:p1', agent_status: 'working' })])
     fake.setRead('wJ:p1', '⏺ Halfway there.')

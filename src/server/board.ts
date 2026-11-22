@@ -3,6 +3,7 @@ import type { HerdrSnapshot, HerdrWorkspace } from './herdr/protocol.js'
 
 export interface BoardState {
   readonly cards: ReadonlyMap<string, Card>
+  readonly nextEpoch: number
 }
 
 const UNKNOWN_REPO = '(unknown)'
@@ -48,6 +49,7 @@ export function boardFromSnapshot(
 ): BoardState {
   const workspaces = new Map(snap.workspaces.map((workspace) => [workspace.workspaceId, workspace]))
   const cards = new Map<string, Card>()
+  let nextEpoch = prev?.nextEpoch ?? 0
   for (const agent of snap.agents) {
     const previous = prev?.cards.get(agent.paneId)
     const unchanged = previous !== undefined && previous.status === agent.status
@@ -63,12 +65,12 @@ export function boardFromSnapshot(
       progress: previous?.progress ?? null,
       agent: agent.agent,
       terminalId: agent.terminalId,
-      statusEpoch: previous === undefined ? 0 : previous.statusEpoch + (unchanged ? 0 : 1),
+      statusEpoch: unchanged ? previous.statusEpoch : nextEpoch++,
       lastReply: previous?.lastReply ?? null,
     }
     cards.set(agent.paneId, withoutSupersededReply(card))
   }
-  return { cards }
+  return { cards, nextEpoch }
 }
 
 export function applyStatusEvent(
@@ -91,11 +93,11 @@ export function applyStatusEvent(
           status: ev.status,
           since: now,
           sinceIsLowerBound: false,
-          statusEpoch: card.statusEpoch + 1,
+          statusEpoch: state.nextEpoch,
         })
       : { ...card, title }
   )
-  return { cards }
+  return { cards, nextEpoch: statusChanged ? state.nextEpoch + 1 : state.nextEpoch }
 }
 
 export function applyProgress(
@@ -111,7 +113,7 @@ export function applyProgress(
     ...card,
     progress: { text, since: now, sinceIsLowerBound: card.progress === null },
   })
-  return { cards }
+  return { ...state, cards }
 }
 
 export function applyReply(
@@ -124,7 +126,7 @@ export function applyReply(
   if (card === undefined) return state
   const cards = new Map(state.cards)
   cards.set(paneId, { ...card, lastReply: { summary, at: now, epoch: card.statusEpoch } })
-  return { cards }
+  return { ...state, cards }
 }
 
 export function expireReplies(state: BoardState, now: number): BoardState {
@@ -134,7 +136,7 @@ export function expireReplies(state: BoardState, now: number): BoardState {
   if (expired.length === 0) return state
   const cards = new Map(state.cards)
   for (const card of expired) cards.set(card.paneId, { ...card, lastReply: null })
-  return { cards }
+  return { ...state, cards }
 }
 
 function bySince(a: Card, b: Card): number {

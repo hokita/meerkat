@@ -77,7 +77,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
   const backoffMaxMs = opts.backoffMaxMs ?? 5000
   const log = opts.log ?? ((message: string) => console.error(message))
 
-  let board: BoardState = { cards: new Map() }
+  let board: BoardState = { cards: new Map(), nextEpoch: 0 }
   let herdr: HerdrConnection = 'connecting'
   let state: SupervisorState = { herdr, board: toView(board) }
   let serialized = JSON.stringify(state)
@@ -213,7 +213,12 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
       statusesDuringSnapshot = []
     }
     if (stopped) return snapshot
-    board = boardFromSnapshot(observationGap ? null : board, snapshot, now(), home)
+    board = boardFromSnapshot(
+      observationGap ? { cards: new Map(), nextEpoch: board.nextEpoch } : board,
+      snapshot,
+      now(),
+      home
+    )
     observationGap = false
     for (const status of received) board = applyStatusEvent(board, status, status.receivedAt)
     herdr = 'connected'
@@ -338,6 +343,7 @@ export function createSupervisor(opts: SupervisorOptions): Supervisor {
       return board.cards.get(paneId)
     },
     recordReply(paneId, summary) {
+      if (!board.cards.has(paneId)) return
       board = applyReply(board, paneId, summary, now())
       publish()
     },

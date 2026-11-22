@@ -289,21 +289,56 @@ describe('statusEpoch', () => {
     expect(state.cards.get('p1')?.statusEpoch).toBe(2)
   })
 
-  it('starts at 0 for new cards and after an observation gap', () => {
-    const first = applyStatusEvent(
-      boardFromSnapshot(null, snapshot([agent('p1', 'working')]), 1000, HOME),
-      { paneId: 'p1', status: 'idle' },
-      1100
-    )
+  it('gives new cards and re-added panes the next counter value', () => {
+    const first = boardFromSnapshot(null, snapshot([agent('p1', 'idle')]), 1000, HOME)
     const added = boardFromSnapshot(
       first,
       snapshot([agent('p1', 'idle'), agent('p2', 'idle')]),
       1200,
       HOME
     )
-    expect(added.cards.get('p2')?.statusEpoch).toBe(0)
-    const gap = boardFromSnapshot(null, snapshot([agent('p1', 'idle')]), 1300, HOME)
-    expect(gap.cards.get('p1')?.statusEpoch).toBe(0)
+    expect(first.cards.get('p1')?.statusEpoch).toBe(0)
+    expect(added.cards.get('p1')?.statusEpoch).toBe(0)
+    expect(added.cards.get('p2')?.statusEpoch).toBe(1)
+    const removed = boardFromSnapshot(added, snapshot([agent('p2', 'idle')]), 1300, HOME)
+    const back = boardFromSnapshot(
+      removed,
+      snapshot([agent('p1', 'idle'), agent('p2', 'idle')]),
+      1400,
+      HOME
+    )
+    expect(back.cards.get('p1')?.statusEpoch).toBe(2)
+  })
+
+  it('increases strictly across changes on different panes', () => {
+    let state = boardFromSnapshot(
+      null,
+      snapshot([agent('p1', 'working'), agent('p2', 'working')]),
+      1000,
+      HOME
+    )
+    const seen: number[] = [...state.cards.values()].map((card) => card.statusEpoch)
+    for (const [paneId, status] of [
+      ['p1', 'idle'],
+      ['p2', 'idle'],
+      ['p1', 'working'],
+    ] as const) {
+      state = applyStatusEvent(state, { paneId, status }, 2000)
+      seen.push(state.cards.get(paneId)?.statusEpoch ?? -1)
+    }
+    expect(seen).toEqual([0, 1, 2, 3, 4])
+  })
+
+  it('continues the counter when seeded from an earlier state after a gap', () => {
+    const before = applyStatusEvent(
+      boardFromSnapshot(null, snapshot([agent('p1', 'blocked')]), 1000, HOME),
+      { paneId: 'p1', status: 'working' },
+      1100
+    )
+    const seeded = { cards: new Map(), nextEpoch: before.nextEpoch }
+    const after = boardFromSnapshot(seeded, snapshot([agent('p1', 'blocked')]), 1200, HOME)
+    expect(before.cards.get('p1')?.statusEpoch).toBe(1)
+    expect(after.cards.get('p1')?.statusEpoch).toBe(2)
   })
 })
 
