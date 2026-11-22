@@ -138,6 +138,7 @@ test('a double click sends once', async ({ page, meerkat }) => {
   const panel = await openReply(page, meerkat, /asking-one/)
   await panel.getByRole('button', { name: /Red/ }).dblclick()
   await expect(panel.getByText('Sent')).toBeVisible()
+  await page.request.get(`${meerkat.baseURL}/api/sessions/${encodeURIComponent(pane)}/output`)
   expect(inputs(meerkat)).toEqual([keys(pane, ['1'])])
 })
 
@@ -153,41 +154,98 @@ test('a changed prompt is shown and nothing is sent', async ({ page, meerkat }) 
   expect(inputs(meerkat)).toEqual([])
 })
 
-test('a page from another local port cannot send input', async ({ page, meerkat }) => {
+test('a page from another local port is refused by Meerkat and cannot send input', async ({
+  page,
+  meerkat,
+}) => {
   const pane = agents.asking.pane_id
   meerkat.fake.setRead(pane, screen('choice-single.txt'))
-  const target = `${meerkat.baseURL}/api/sessions/${encodeURIComponent(pane)}/reply`
-  const body = JSON.stringify({
-    replyId: 'cross-origin-1',
-    fingerprint: 'guess',
+  await page.goto(meerkat.baseURL)
+  const token = await page.locator('meta[name="meerkat-token"]').getAttribute('content')
+  const output = await page.request.get(
+    `${meerkat.baseURL}/api/sessions/${encodeURIComponent(pane)}/output`
+  )
+  const { prompt } = (await output.json()) as { prompt: { fingerprint: string } }
+  const replyUrl = `${meerkat.baseURL}/api/sessions/${encodeURIComponent(pane)}/reply`
+  const attack = (replyId: string) => ({
+    replyId,
+    fingerprint: prompt.fingerprint,
     action: { type: 'option', n: 1 },
   })
-  const html = `<!doctype html><title>other</title><body><p id="out"></p><script>
-const cors = fetch(${JSON.stringify(target)}, {
+  const evilHtml = `<!doctype html><title>other</title><body><p id="out"></p><script>
+const params = new URLSearchParams(location.search)
+const target = params.get('target')
+const token = params.get('token')
+const json = fetch(target, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'X-Meerkat-Token': 'guess' },
-  body: ${JSON.stringify(body)},
-}).then(() => 'cors-answered', () => 'cors-blocked')
-const simple = fetch(${JSON.stringify(target)}, {
+  headers: { 'Content-Type': 'application/json', 'X-Meerkat-Token': token },
+  body: params.get('jsonBody'),
+}).then(() => 'json-answered', () => 'json-blocked')
+const simple = fetch(target, {
   method: 'POST',
   mode: 'no-cors',
   headers: { 'Content-Type': 'text/plain' },
-  body: ${JSON.stringify(body)},
+  body: params.get('simpleBody'),
 }).then(() => 'simple-answered', () => 'simple-blocked')
-Promise.all([cors, simple]).then((results) => {
+Promise.all([json, simple]).then((results) => {
   document.getElementById('out').textContent = 'settled ' + results.join(' ')
 })
 </script>`
   const other: Server = createServer((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' })
-    res.end(html)
+    res.end(evilHtml)
   })
   try {
     await new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve))
     const { port } = other.address() as AddressInfo
-    await page.goto(`http://127.0.0.1:${port}/`)
-    await expect(page.locator('#out')).toContainText('settled')
+    const evil = await page.context().newPage()
+    const failed: string[] = []
+    const answers: { method: string; status: number }[] = []
+    evil.on('requestfailed', (request) => {
+      if (request.url() === replyUrl) failed.push(request.method())
+    })
+    evil.on('response', (response) => {
+      if (response.url() === replyUrl) {
+        answers.push({ method: response.request().method(), status: response.status() })
+      }
+    })
+    const cdp = await page.context().newCDPSession(evil)
+    await cdp.send('Network.enable')
+    cdp.on('Network.responseReceived', (event) => {
+      if (event.type === 'Preflight' && event.response.url === replyUrl) {
+        answers.push({ method: 'OPTIONS', status: event.response.status })
+      }
+    })
+    const query = new URLSearchParams({
+      target: replyUrl,
+      token: token ?? '',
+      jsonBody: JSON.stringify(attack('evil-json')),
+      simpleBody: JSON.stringify(attack('evil-simple')),
+    })
+    await evil.goto(`http://127.0.0.1:${port}/?${query.toString()}`)
+    await expect(evil.locator('#out')).toContainText('settled')
+    await expect.poll(() => answers).toContainEqual({ method: 'POST', status: 403 })
+    await expect.poll(() => answers).toContainEqual({ method: 'OPTIONS', status: 405 })
+    await expect.poll(() => failed).toEqual(['POST'])
+    expect(answers.filter((entry) => entry.method === 'POST')).toEqual([
+      { method: 'POST', status: 403 },
+    ])
     expect(inputs(meerkat)).toEqual([])
+    await evil.close()
+
+    const control = await page.evaluate(
+      async ({ url, headerToken, body }) => {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Meerkat-Token': headerToken },
+          body: JSON.stringify(body),
+        })
+        return response.status
+      },
+      { url: replyUrl, headerToken: token ?? '', body: attack(crypto.randomUUID()) }
+    )
+    expect(control).toBe(200)
+    expect(inputs(meerkat)).toEqual([keys(pane, ['1'])])
   } finally {
     await new Promise<void>((resolve) => other.close(() => resolve()))
   }
