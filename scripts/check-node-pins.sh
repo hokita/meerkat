@@ -26,7 +26,7 @@ check() {
 }
 
 v="${expected//./\\.}"
-check "setup-node node-version" 2 'node-version:' "node-version: '${v}'$" .github/workflows/*.yml
+check "setup-node node-version" 3 'node-version:' "node-version: '${v}'$" .github/workflows/*.yml
 check "Volta node" 1 '"node":' "\"node\": \"${v}\"$" package.json
 
 if [ "$bad" -ne 0 ]; then
