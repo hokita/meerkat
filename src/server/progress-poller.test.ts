@@ -121,6 +121,78 @@ describe('createProgressPoller', () => {
     expect(calls).toEqual(['a', 'b', 'b'])
   })
 
+  describe('follow-up read after leaving working', () => {
+    async function start(status: 'working' | 'idle') {
+      const ctx = setup()
+      active = ctx.poller
+      ctx.poller.sync([{ paneId: 'a', status }])
+      await settle()
+      ctx.pending[0]!.resolve('x')
+      await settle()
+      return ctx
+    }
+
+    it('reads once more at the next tick after working becomes done', async () => {
+      const { poller, calls, pending } = await start('working')
+      poller.sync([{ paneId: 'a', status: 'done' }])
+      await settle()
+      expect(calls).toEqual(['a', 'a'])
+      pending[1]!.resolve('y')
+      await settle()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(calls).toEqual(['a', 'a', 'a'])
+      pending[2]!.resolve('z')
+      await settle()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(calls).toEqual(['a', 'a', 'a'])
+    })
+
+    it('does not follow up when the pane was not working', async () => {
+      const { poller, calls, pending } = await start('idle')
+      poller.sync([{ paneId: 'a', status: 'done' }])
+      await settle()
+      pending[1]!.resolve('y')
+      await settle()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(calls).toEqual(['a', 'a'])
+    })
+
+    it('drops the follow-up when the pane is removed', async () => {
+      const { poller, calls, pending } = await start('working')
+      poller.sync([{ paneId: 'a', status: 'done' }])
+      await settle()
+      pending[1]!.resolve('y')
+      await settle()
+      poller.sync([])
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(calls).toEqual(['a', 'a'])
+    })
+
+    it('drops the follow-up when the pane works again', async () => {
+      const { poller, calls, pending } = await start('working')
+      poller.sync([{ paneId: 'a', status: 'done' }])
+      await settle()
+      pending[1]!.resolve('y')
+      await settle()
+      poller.sync([{ paneId: 'a', status: 'working' }])
+      await settle()
+      pending[2]!.resolve('z')
+      await settle()
+      poller.sync([{ paneId: 'a', status: 'done' }])
+      await settle()
+      pending[3]!.resolve('w')
+      await settle()
+      poller.sync([{ paneId: 'a', status: 'working' }])
+      await settle()
+      pending[4]!.resolve('v')
+      await settle()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(calls).toEqual(['a', 'a', 'a', 'a', 'a', 'a'])
+    })
+  })
+
   it('never has two reads in flight', async () => {
     const { poller, calls, pending } = setup()
     active = poller

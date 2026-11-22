@@ -22,6 +22,7 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
   const intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS
   let known = new Map<string, AgentStatus>()
   const queue = new Set<string>()
+  const followUps = new Set<string>()
   let reading: string | null = null
   let draining = false
   let lastDrain: Promise<void> = Promise.resolve()
@@ -71,6 +72,10 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
     for (const [paneId, status] of known) {
       if (status === 'working' && paneId !== reading) queue.add(paneId)
     }
+    for (const paneId of followUps) {
+      if (known.get(paneId) !== 'working') queue.add(paneId)
+    }
+    followUps.clear()
     drain()
   }, intervalMs)
 
@@ -80,7 +85,14 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
       const previous = known
       known = new Map(panes.map((pane) => [pane.paneId, pane.status]))
       for (const [paneId, status] of known) {
-        if (previous.get(paneId) !== status) queue.add(paneId)
+        if (previous.get(paneId) === status) continue
+        queue.add(paneId)
+        if (previous.get(paneId) === 'working') followUps.add(paneId)
+      }
+      for (const paneId of followUps) {
+        if (known.get(paneId) === undefined || known.get(paneId) === 'working') {
+          followUps.delete(paneId)
+        }
       }
       drain()
     },
@@ -88,6 +100,7 @@ export function createProgressPoller(opts: ProgressPollerOptions): ProgressPolle
       stopped = true
       clearInterval(timer)
       queue.clear()
+      followUps.clear()
       return lastDrain
     },
   }
