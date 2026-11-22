@@ -6,12 +6,14 @@ export const MAX_PROGRESS_CHARS = 280
 
 const MARKER = '⏺'
 const RESULT_MARKER = '⎿'
-const TOOL_CALL_HEAD = /^[A-Za-z][\w-]*\(/
+const TOOL_CALL_HEAD = /^[A-Za-z][\w-]*(?: [A-Za-z][\w-]*)*\(/
+const MCP_TOOL_CALL = '(MCP)('
+const SHORTCUTS_FOOTER = '? for shortcuts'
 const BOX_DRAWING_ONLY = /^[─-╿ ]+$/
 const SPINNER_LINE = /^[·✢✳✶✻✽⠀-⣿] /
 
 function normalizeLine(line: string): string {
-  return line.replaceAll(' ', ' ').trimEnd()
+  return line.replaceAll('\u00a0', ' ').trimEnd()
 }
 
 function isResultLine(line: string): boolean {
@@ -29,6 +31,8 @@ function isChrome(line: string): boolean {
     /^[│╭╰]/.test(line) ||
     line.startsWith('❯') ||
     trimmed.startsWith('⏵') ||
+    trimmed.startsWith(RESULT_MARKER) ||
+    trimmed.startsWith(SHORTCUTS_FOOTER) ||
     SPINNER_LINE.test(line)
   )
 }
@@ -62,7 +66,7 @@ function readBlock(lines: string[], start: number): Block {
   const followedByResult = next < lines.length && isResultLine(lines[next] ?? '')
   return {
     text: collapse(parts.join(' ')),
-    isToolCall: TOOL_CALL_HEAD.test(head.trim()) || followedByResult,
+    isToolCall: TOOL_CALL_HEAD.test(head) || head.includes(MCP_TOOL_CALL) || followedByResult,
   }
 }
 

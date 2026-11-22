@@ -3,7 +3,7 @@ import { fakeSnapshot, startFakeHerdr, type FakeHerdr } from '../../test-support
 import { createHerdrClient } from './herdr/client.js'
 import { extractProgress, readProgress } from './progress.js'
 
-const NBSP = ' '
+const NBSP = '\u00a0'
 const CLAUDE_SCREEN = [
   '⏺ I will check the parser first.',
   '',
@@ -47,6 +47,19 @@ describe('extractProgress', () => {
     }
   })
 
+  it('skips spaced and MCP tool-call heads but keeps parenthesised sentences', () => {
+    expect(extractProgress('⏺ Done with setup.\n\n⏺ Web Search("meerkat")')).toBe(
+      'Done with setup.'
+    )
+    expect(
+      extractProgress('⏺ Done with setup.\n\n⏺ claude_ai_Gmail - search (MCP)(query: "x")')
+    ).toBe('Done with setup.')
+    expect(extractProgress('⏺ Task 2 is done (commits a..b).')).toBe(
+      'Task 2 is done (commits a..b).'
+    )
+    expect(extractProgress('⏺ Audit: Go (1.24) passes.')).toBe('Audit: Go (1.24) passes.')
+  })
+
   it('joins continuation lines of a block', () => {
     expect(
       extractProgress('⏺ First part of the\n  sentence continues\n  here.\n\n  Second paragraph.')
@@ -69,6 +82,12 @@ describe('extractProgress', () => {
     expect(extractProgress(text)).toBe('compiled 12 files')
   })
 
+  it('returns null for a fresh or cleared Claude screen', () => {
+    const text = `❯${NBSP}/clear\n  ⎿ ${NBSP}(no content)\n\n${'─'.repeat(40)}\n❯${NBSP}\n${'─'.repeat(40)}\n  ? for shortcuts`
+    expect(extractProgress(text)).toBeNull()
+    expect(extractProgress('compiled\n  ⎿  noise')).toBe('compiled')
+  })
+
   it('never returns prompt lines', () => {
     for (const text of ['❯ suggested command', `❯${NBSP}`, '❯', '╭────╮\n│ > hi │\n╰────╯']) {
       expect(extractProgress(text)).toBeNull()
@@ -89,6 +108,7 @@ describe('extractProgress', () => {
     expect(long).toHaveLength(280)
     expect(long?.endsWith('…')).toBe(true)
     const emoji = extractProgress('⏺ ' + '😀'.repeat(300)) ?? ''
+    expect(Array.from(emoji)).toHaveLength(280)
     expect(emoji).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/)
     expect(emoji.endsWith('…')).toBe(true)
   })
