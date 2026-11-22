@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: '24.22.3'
+          node-version: '26.13.1'
           cache: npm
       - run: npm ci
       - run: npm run check:node-pins
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: '24.22.3'
+          node-version: '26.13.1'
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: '24.22.3'
+          node-version: '26.13.1'
       - run: npm audit --package-lock-only --omit=dev --audit-level=high
 
   action-pins:

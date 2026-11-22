@@ -6,7 +6,7 @@ opens the last lines of a session's output on demand. It can also reply to a ses
 
 ## Run
 
-Meerkat needs Node 24.22.3, pinned with [Volta](https://volta.sh) in `package.json`.
+Meerkat needs Node 26.13.1, pinned with [Volta](https://volta.sh) in `package.json`.
 
 ```sh
 npm install
