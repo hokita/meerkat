@@ -1,3 +1,7 @@
+import type { HerdrClient } from './herdr/client.js'
+import { parseReadResponse } from './herdr/protocol.js'
+import { sanitizeOutput } from './output.js'
+
 export const MAX_PROGRESS_CHARS = 280
 
 const MARKER = '⏺'
@@ -74,4 +78,17 @@ export function extractProgress(text: string): string | null {
   }
   const fallback = lines.findLast((line) => line.trim() !== '' && !isChrome(line))
   return fallback === undefined ? null : cap(collapse(fallback))
+}
+
+export async function readProgress(client: HerdrClient, paneId: string): Promise<string | null> {
+  const line = await client.request('agent.read', {
+    target: paneId,
+    source: 'recent_unwrapped',
+    lines: 120,
+    format: 'text',
+    strip_ansi: true,
+  })
+  const read = parseReadResponse(line)
+  if (read.kind === 'gone') return null
+  return extractProgress(sanitizeOutput(read.text).text)
 }

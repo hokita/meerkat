@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { extractProgress } from './progress.js'
+import { afterEach, describe, expect, it } from 'vitest'
+import { fakeSnapshot, startFakeHerdr, type FakeHerdr } from '../../test-support/fake-herdr.js'
+import { createHerdrClient } from './herdr/client.js'
+import { extractProgress, readProgress } from './progress.js'
 
 const NBSP = ' '
 const CLAUDE_SCREEN = [
@@ -99,5 +101,41 @@ describe('extractProgress', () => {
     expect(extractProgress('⏺')).toBeNull()
     expect(extractProgress('npm output\n⏺')).toBeNull()
     expect(extractProgress('⏺ Done.\n\n⏺')).toBe('Done.')
+  })
+})
+
+describe('readProgress', () => {
+  const fakes: FakeHerdr[] = []
+
+  afterEach(async () => {
+    for (const fake of fakes.splice(0)) await fake.stop()
+  })
+
+  async function startFake(reads: Record<string, string> = {}) {
+    const fake = await startFakeHerdr({ snapshot: fakeSnapshot({ agents: [] }), reads })
+    fakes.push(fake)
+    return fake
+  }
+
+  it('sends agent.read with the pinned params', async () => {
+    const fake = await startFake({ 'w1:p1': '⏺ Halfway there.' })
+    const client = createHerdrClient({ socketPath: fake.socketPath })
+    expect(await readProgress(client, 'w1:p1')).toBe('Halfway there.')
+    expect(fake.received).toContainEqual({
+      method: 'agent.read',
+      params: {
+        target: 'w1:p1',
+        source: 'recent_unwrapped',
+        lines: 120,
+        format: 'text',
+        strip_ansi: true,
+      },
+    })
+  })
+
+  it('returns null for a closed pane', async () => {
+    const fake = await startFake()
+    const client = createHerdrClient({ socketPath: fake.socketPath })
+    expect(await readProgress(client, 'w9:p9')).toBeNull()
   })
 })
