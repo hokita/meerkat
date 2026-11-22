@@ -30,7 +30,8 @@ Input: the pane's recent output from `agent.read` (`recent_unwrapped`, text, ANS
    continuation lines are the following non-blank lines that start with two spaces and are not `⎿` result
    lines. The block's text is the head plus its continuation lines, trimmed and joined with single spaces.
 2. **Skip tool calls.** A block is a tool call when its head looks like `Name(…)` (`Bash(`, `Agent(`, `Read(`,
-   `Update(`, `Write(`, `Skill(`, …) **or** when the next non-blank line after its continuation lines is a `⎿`
+   `Update(`, `Write(`, `Skill(`, …, also names with spaces such as `Web Search(`), contains `(MCP)(`
+   (`claude_ai_Gmail - search (MCP)(query: …)`) **or** when the next non-blank line after its continuation lines is a `⎿`
    result line. Claude Code sometimes renders a Bash call by its description instead of `Bash(`
    (`⏺ Reading the pane output…` then `  ⎿  $ printf …`), so the `⎿` rule is needed.
 3. The update sentence is the text of the **last** block that isn't a tool call.
@@ -39,6 +40,8 @@ Input: the pane's recent output from `agent.read` (`recent_unwrapped`, text, ANS
    - lines made only of box-drawing characters (`───`, `╭`, `│`, `╰` frames),
    - lines starting with `❯` (prompt, autosuggestions, echoed user input), whether followed by a space,
      U+00A0 or nothing,
+   - `⎿` result lines (e.g. `⎿ (no content)` after `/clear`),
+   - the `? for shortcuts` footer,
    - the status bar (`⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt …`),
    - spinner and timing lines (`· Flummoxing… (44s · ↓ 2.3k tokens)`, `✻ Churned for 4s · done 20:39`).
 5. If `⏺` blocks exist but all of them are tool calls, there is no new sentence: the card keeps the one it
@@ -48,6 +51,8 @@ Input: the pane's recent output from `agent.read` (`recent_unwrapped`, text, ANS
 ## Freshness
 
 - Each **working** session is re-read about every 10 s.
+- One more read of a session runs one interval after it stops working, since Claude Code may draw its final
+  message after the status changes.
 - Every session is read on first load, when it appears, and whenever its status changes.
 - Reads run one at a time. Only the existing allow-listed, read-only `agent.read` is used; no new Herdr
   methods.

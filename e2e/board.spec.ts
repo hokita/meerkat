@@ -108,7 +108,8 @@ test.describe('with 60 sessions', () => {
 test.describe('with progress reads', () => {
   test.use({
     initialReads: {
-      'w3:p1': '⏺ Bash(npm test)\n  ⎿  ok\n\n⏺ Tests are green; writing the docs next.\n\n❯ ',
+      [agents.working.pane_id]:
+        '⏺ Bash(npm test)\n  ⎿  ok\n\n⏺ Tests are green; writing the docs next.\n\n❯ ',
     },
   })
 

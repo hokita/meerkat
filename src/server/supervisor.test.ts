@@ -500,7 +500,6 @@ describe('supervisor', () => {
     await vi.waitFor(() => expect(count(fake, 'events.subscribe')).toBe(1))
     await vi.waitFor(() => expect(count(fake, 'agent.read')).toBeGreaterThan(1))
     await supervisor.stop()
-    await new Promise((resolve) => setTimeout(resolve, 30))
     const total = fake.received.length
     const connections = fake.connectionCount
     fake.pushStatus('wJ:p1', 'done')
